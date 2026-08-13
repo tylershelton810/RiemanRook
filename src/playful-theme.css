@@ -19,6 +19,9 @@ input, button, select { font-size: 16px; }
 .app-shell { max-width: 1280px; }
 .topbar { height: 78px; border-bottom-color: #dce7e3; }
 .brand { letter-spacing: 0; }
+.profile-email { margin-left: 12px; color: var(--ink); font: 11px 'DM Sans'; text-transform: none; letter-spacing: 0; }
+.sign-out-button { margin-left: 8px; border: 1px solid #c4d2ce; border-radius: 8px; background: #fff; color: var(--green); padding: 7px 10px; font: 600 10px 'DM Mono'; text-transform: uppercase; cursor: pointer; }
+@media (max-width: 800px) { .connection .sign-out-button { display: inline-block; font-size: 9px; margin-left: 6px; } .connection .profile-email { display: none; } }
 .brand-mark { width: 34px; height: 34px; background: var(--coral); color: #fff; border-radius: 11px 11px 11px 3px; transform: rotate(-6deg); font-family: 'DM Mono', monospace; }
 .connection { color: #819094; }
 .hero { min-height: 500px; }

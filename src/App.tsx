@@ -54,6 +54,11 @@ function App() {
   }, [])
   const filled = seats.filter((seat) => seat.status !== 'open').length
   const showToast = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2800) }
+  const signOut = async () => {
+    if (!supabase) return
+    const { error } = await supabase.auth.signOut()
+    if (error) showToast(`Sign out failed: ${error.message}`)
+  }
   const makeAi = async (id: string) => {
     if (activeLobbyId && session?.user && session.user.id === activeLobbyHostId) {
       try { setSeats(await addAiSeat(activeLobbyId, session.user.id, id)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to add Crow AI.') }
@@ -215,7 +220,7 @@ function App() {
 
   return <main className="app-shell">
     {toast && <div className="toast">{toast}</div>}
-    <header className="topbar"><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className={`status-dot ${isSupabaseConfigured ? 'online' : ''}`} /> {isSupabaseConfigured ? 'Connected' : 'Demo mode'} <button className="profile-button" onClick={() => supabase?.auth.signOut()}><Avatar label={session?.user.email ?? name} color="gold" /> <span>{session?.user.email ?? name}</span>⌄</button></div></header>
+    <header className="topbar"><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className={`status-dot ${isSupabaseConfigured ? 'online' : ''}`} /> {isSupabaseConfigured ? 'Connected' : 'Demo mode'} <span className="profile-email">{session?.user.email ?? name}</span><button className="sign-out-button" onClick={signOut}>Sign out</button></div></header>
     <section className="hero"><div className="hero-copy"><p className="eyebrow">A better seat at the table</p><h1>Bring your people.<br /><em>Deal the cards.</em></h1><p className="hero-text">A cozy place for family games, friendly rivalries, and one more hand before bed.</p><div className="hero-actions"><button className="button primary" onClick={startLobby}>Create a private table <span>→</span></button><label className="join-field"><span>Have a code?</span><input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())} placeholder="CROW-XXXX" /><button onClick={() => joinCode ? enterLobby() : showToast('Enter a table code first.')}>Join</button></label></div></div><div className="hero-art"><div className="sun" /><div className="card card-back"><div className="card-pattern">C</div></div><div className="card card-front"><span className="card-corner">14<br /><i>red</i></span><span className="card-number">14</span><span className="card-corner bottom">14<br /><i>red</i></span></div><span className="sparkle one">✦</span><span className="sparkle two">✦</span></div></section>
     <section className="content-grid"><div className="panel welcome-panel"><div className="panel-heading"><div><p className="eyebrow">Your table</p><h2>Ready when you are</h2></div><span className="pill">New</span></div><div className="empty-table"><div className="mini-cards"><span>14</span><span>10</span><span>R</span></div><p>Create a private table and invite<br />your family with a simple code.</p><button className="text-button" onClick={startLobby}>Start a new table <span>→</span></button></div></div><div className="panel stats-panel"><div className="panel-heading"><div><p className="eyebrow">Your record</p><h2>At a glance</h2></div><button className="icon-button">↗</button></div><div className="stat-grid"><div><strong>{playerStats?.games_won ?? '—'}</strong><span>Games won</span></div><div><strong>{playerStats && playerStats.games_completed ? `${Math.round((playerStats.games_won / playerStats.games_completed) * 100)}%` : '—'}</strong><span>Win rate</span></div><div><strong>{playerStats?.hands_played ?? '—'}</strong><span>Hands played</span></div></div><p className="muted-note">Stats count completed player-only games.</p></div></section>
     <footer><span>Rieman family table · Built for the long haul</span><span>Rieman Rules · 4 players</span></footer>
