@@ -37,6 +37,13 @@ export async function getActiveGameSession(lobbyId: string) {
   return data as { id: string; game_state: SessionState & { turnTimer: number } } | null
 }
 
+export async function getCurrentGameSession(lobbyId: string) {
+  if (!supabase) throw new Error('Supabase is not configured.')
+  const { data, error } = await supabase.from('game_sessions').select('id, game_state, status').eq('lobby_id', lobbyId).in('status', ['active', 'completed']).order('created_at', { ascending: false }).limit(1).maybeSingle()
+  if (error) throw error
+  return data as { id: string; status: 'active' | 'completed'; game_state: SessionState & { turnTimer: number } } | null
+}
+
 export async function submitBid(sessionId: string, state: SessionState, playerId: string, amount: number | null) {
   if (!supabase) throw new Error('Supabase is not configured.')
   const nextState = recordBid(structuredClone(state), playerId, amount)
@@ -50,8 +57,9 @@ async function updateGameState(sessionId: string, state: SessionState) {
   const { data, error } = await supabase.from('game_sessions').update({ game_state: state, status: state.status === 'completed' ? 'completed' : 'active', completed_at: state.status === 'completed' ? new Date().toISOString() : null }).eq('id', sessionId).eq('status', 'active').select('game_state').single()
   if (error) throw error
   if (state.status === 'completed') {
-    const { error: statsError } = await supabase.rpc('finalize_session_statistics', { p_session_id: sessionId })
-    if (statsError) throw statsError
+    // The result screen must not depend on statistics finalization succeeding.
+    // The RPC is idempotent and can be retried independently.
+    try { await supabase.rpc('finalize_session_statistics', { p_session_id: sessionId }) } catch { /* result state is already persisted */ }
   }
   return data.game_state as SessionState & { turnTimer: number }
 }

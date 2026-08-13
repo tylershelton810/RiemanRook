@@ -4,7 +4,7 @@ import type { Session } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import type { Difficulty, LobbySeat } from './lib/types'
 import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getLobbySnapshot, getLobbyMembers, joinLobby, membersToSeats, recoverLatestLobby, updateLobbySettings } from './services/lobbies'
-import { closeLobby, dealNextHand, getActiveGameSession, getPlayerStatistics, rematchSession, startGameSession, submitBid, submitTrump, submitDiscard, submitCard } from './services/sessions'
+import { closeLobby, dealNextHand, getActiveGameSession, getCurrentGameSession, getPlayerStatistics, rematchSession, startGameSession, submitBid, submitTrump, submitDiscard, submitCard } from './services/sessions'
 import { createConfetti } from './game/celebration'
 import type { Card, SessionState } from './game/types'
 import type { CardColor } from './game/types'
@@ -88,10 +88,10 @@ function App() {
       setTimer(lobby.settings?.turnTimer ?? 30)
       setWinningScore(lobby.settings?.winningScore ?? 500)
       if (lobby.status === 'in_progress') {
-        const activeSession = await getActiveGameSession(lobby.id)
-        if (activeSession && !cancelled) {
-          setActiveGameSessionId(activeSession.id)
-          setActiveGame(activeSession.game_state)
+        const currentSession = await getCurrentGameSession(lobby.id)
+        if (currentSession && !cancelled) {
+          setActiveGameSessionId(currentSession.id)
+          setActiveGame(currentSession.game_state)
           setView('game')
         }
       } else if (!cancelled) {
@@ -112,7 +112,7 @@ function App() {
     const refreshMembers = async () => {
       try {
         setSeats(await getLobbySnapshot(activeLobbyId))
-        const started = await getActiveGameSession(activeLobbyId)
+        const started = await getCurrentGameSession(activeLobbyId)
         if (started && !activeGame) {
           setActiveGameSessionId(started.id)
           setActiveGame(started.game_state)
@@ -124,7 +124,7 @@ function App() {
     const onLobbyChange = (payload: { new?: { status?: string } }) => {
       refreshMembers()
       if (payload.new?.status === 'in_progress') {
-        getActiveGameSession(activeLobbyId).then((sessionState) => {
+        getCurrentGameSession(activeLobbyId).then((sessionState) => {
           if (sessionState) { setActiveGameSessionId(sessionState.id); setActiveGame(sessionState.game_state); setView('game') }
         }).catch((error) => showToast(error.message))
       }
@@ -134,6 +134,7 @@ function App() {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'lobbies', filter: `id=eq.${activeLobbyId}` }, onLobbyChange)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_sessions', filter: activeGameSessionId ? `id=eq.${activeGameSessionId}` : 'id=eq.none' }, (payload) => {
         setActiveGame(payload.new.game_state as SessionState)
+        setView('game')
       })
       .subscribe()
     const refreshTimer = window.setInterval(refreshMembers, 1500)
