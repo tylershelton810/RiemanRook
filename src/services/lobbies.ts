@@ -16,7 +16,7 @@ export interface LobbyRecord {
   join_code: string
   host_id: string
   status: 'waiting' | 'in_progress' | 'finished'
-  settings: { ruleset: string; turnTimer: number }
+  settings: { ruleset: string; turnTimer: number; winningScore?: number }
   members: LobbyMemberRow[]
 }
 

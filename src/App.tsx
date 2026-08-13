@@ -35,9 +35,9 @@ function App() {
   const [winningScore, setWinningScore] = useState(500)
   const [seats, setSeats] = useState<LobbySeat[]>([
     { id: 'you', name: 'You', status: 'human', team: 'A' },
-    { id: 'mike', name: 'Mike', status: 'human', team: 'B' },
-    { id: 'seat-3', name: 'Open seat', status: 'open', team: 'A' },
-    { id: 'seat-4', name: 'Open seat', status: 'open', team: 'B' },
+    { id: 'seat-1', name: 'Open seat', status: 'open', team: 'B' },
+    { id: 'seat-2', name: 'Open seat', status: 'open', team: 'A' },
+    { id: 'seat-3', name: 'Open seat', status: 'open', team: 'B' },
   ])
 
   useEffect(() => {
@@ -164,13 +164,21 @@ function App() {
   }, [activeGame, activeGameSessionId, activeLobbyHostId, session])
 
   const startLobby = async () => {
-    if (!session?.user) return setView('lobby')
+    if (!session?.user) return showToast('Sign in before creating a lobby.')
     try {
+      setActiveLobbyId(null)
+      setActiveLobbyHostId(null)
+      setActiveGameSessionId(null)
+      setActiveGame(null)
       await ensureProfile(session.user.id, session.user.email)
       const lobby = await createLobby(session.user.id)
+      const snapshot = await getLobbySnapshot(lobby.id)
+      setSeats(snapshot)
       setLobbyCode(lobby.join_code)
       setActiveLobbyId(lobby.id)
       setActiveLobbyHostId(lobby.host_id)
+      setTimer(lobby.settings?.turnTimer ?? 30)
+      setWinningScore(lobby.settings?.winningScore ?? 500)
       setView('lobby')
     } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to create the lobby.') }
   }
