@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import type { Difficulty, LobbySeat } from './lib/types'
-import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getLobbySnapshot, joinLobby, getLobbyMembers, membersToSeats, updateLobbySettings } from './services/lobbies'
+import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getLobbySnapshot, getLobbyMembers, joinLobby, membersToSeats, recoverLatestLobby, updateLobbySettings } from './services/lobbies'
 import { closeLobby, dealNextHand, getActiveGameSession, getPlayerStatistics, rematchSession, startGameSession, submitBid, submitTrump, submitDiscard, submitCard } from './services/sessions'
 import { createConfetti } from './game/celebration'
 import type { Card, SessionState } from './game/types'
@@ -68,6 +68,33 @@ function App() {
     if (!session?.user) return
     ensureProfile(session.user.id, session.user.email).catch((error) => showToast(error.message))
   }, [session])
+
+  useEffect(() => {
+    if (!session?.user || activeLobbyId) return
+    let cancelled = false
+    recoverLatestLobby(session.user.id).then(async (lobby) => {
+      if (!lobby || cancelled) return
+      const recoveredSeats = await getLobbySnapshot(lobby.id)
+      if (cancelled) return
+      setLobbyCode(lobby.join_code)
+      setActiveLobbyId(lobby.id)
+      setActiveLobbyHostId(lobby.host_id)
+      setSeats(recoveredSeats)
+      setTimer(lobby.settings?.turnTimer ?? 30)
+      setWinningScore(lobby.settings?.winningScore ?? 500)
+      if (lobby.status === 'in_progress') {
+        const activeSession = await getActiveGameSession(lobby.id)
+        if (activeSession && !cancelled) {
+          setActiveGameSessionId(activeSession.id)
+          setActiveGame(activeSession.game_state)
+          setView('game')
+        }
+      } else if (!cancelled) {
+        setView('lobby')
+      }
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [session, activeLobbyId])
 
   useEffect(() => {
     if (!session?.user) return
@@ -227,6 +254,7 @@ function Lobby({ code, seats, timer, setTimer, winningScore, setWinningScore, on
 
 function GameScreen({ game, sessionId, currentUserId, isHost, onRematch, onCloseLobby, onNextHand, onBid, onTrump, onDiscard, onCard, onBack }: { game: SessionState; sessionId: string | null; currentUserId?: string; isHost: boolean; onRematch: () => void; onCloseLobby: () => void; onNextHand: () => void; onBid: (amount: number | null) => void; onTrump: (color: CardColor) => void; onDiscard: (cardIds: string[]) => void; onCard: (cardId: string) => void; onBack: () => void }) {
   const [selectedDiscard, setSelectedDiscard] = useState<string[]>([])
+  const showShuffle = false
   const currentPlayer = game.players[game.hand?.currentPlayerIndex ?? 0]
   const me = game.players.find((player) => player.id === currentUserId)
   const bidder = game.players.find((player) => player.id === game.hand?.bidderId)
@@ -241,18 +269,22 @@ function GameScreen({ game, sessionId, currentUserId, isHost, onRematch, onClose
   const lastTrick = [...(game.hand?.tricks ?? [])].reverse().find((trick) => trick.cards.length === 4)
   const tableTrick = game.hand?.tricks[game.hand.tricks.length - 1]
   const latestBids = new Map((game.hand?.bids ?? []).map((bid, index, bids) => [bid.playerId, { ...bid, index }]))
+  const visualPosition = (playerIndex: number) => {
+    const myIndex = Math.max(0, game.players.findIndex((player) => player.id === currentUserId))
+    return (playerIndex - myIndex + game.players.length) % game.players.length
+  }
   const leadColor = leadColorForTrick(activeTrick, game.hand?.trumpColor)
   const legalCardIds = new Set((me?.hand ?? []).filter((card) => canPlayCard(me?.hand ?? [], card, leadColor, game.hand?.trumpColor)).map((card) => card.id))
   const toggleDiscard = (card: Card) => { if (card.kind === 'crow' || (card.kind === 'number' && [5, 10, 14].includes(card.value))) return; setSelectedDiscard((selected) => selected.includes(card.id) ? selected.filter((id) => id !== card.id) : selected.length < 5 ? [...selected, card.id] : selected) }
   const phaseTitle = game.hand?.phase === 'bidding' ? 'Make your bid.' : game.hand?.phase === 'trump' ? 'Choose trump.' : game.hand?.phase === 'kitty' ? 'Discard the kitty.' : 'The hand is live.'
   return <main className="app-shell game-shell">
+    <TableHandPoints game={game} />
     <header className="topbar"><button className="back-button" onClick={onBack}>← <span>Lobby</span></button><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className="status-dot online" /> Live table</div></header>
     <section className="game-header"><div><p className="eyebrow">Rieman Rules · Hand {game.handNumber + 1}</p><h1>{phaseTitle}</h1><p>{game.hand?.phase === 'bidding' ? (isMyTurn ? 'It’s your turn to bid' : `${currentPlayer?.name ?? 'A player'} is bidding`) : game.hand?.phase === 'trump' ? `${bidder?.name ?? 'The winning bidder'} won the bid` : game.hand?.phase === 'kitty' ? `${bidder?.name ?? 'The winning bidder'} is choosing the discard` : 'Clockwise play has begun'}</p></div><div className="scoreboard"><div><span>Team A</span><strong>{game.scores.A}</strong></div><div><span>Team B</span><strong>{game.scores.B}</strong></div></div></section>
     {game.hand?.phase === 'bidding' && <div className="bid-banner bidding-banner"><strong>Current bid: {game.hand.currentBid ?? 'No bids yet'}</strong><span>{currentPlayer?.name ?? 'Player'} is up · bidding in progress</span></div>}
     {game.hand?.bidderId && game.hand.phase !== 'bidding' && <div className={`bid-banner trump-banner ${game.hand.trumpColor ? `trump-${game.hand.trumpColor}` : ''}`}><strong>Team {bidder?.team} won the bid</strong><span>Bid: {game.hand.currentBid} · {game.hand.trumpColor ? `Trump: ${game.hand.trumpColor}` : 'Choosing trump'}</span></div>}
     {game.hand?.phase === 'complete' && <div className={`result-banner ${game.hand.bidMade ? '' : 'failed-bid'}`}><strong>{game.hand.bidMade ? `Team ${game.hand.bidderTeam} made the bid` : `Team ${game.hand.bidderTeam} failed the bid`}</strong><span>Bid {game.hand.currentBid} · Captured {game.hand.teamPoints?.[game.hand.bidderTeam ?? 'A'] ?? 0} · Score {game.hand.scoreDelta?.[game.hand.bidderTeam ?? 'A'] ?? 0}</span></div>}
-    {game.hand?.phase !== 'bidding' && <div className="hand-points"><span>Hand points</span><strong>Team A {capturedPointsForTeam(game, 'A')}</strong><strong>Team B {capturedPointsForTeam(game, 'B')}</strong><small>of 110</small></div>}
-    <section className="game-board"><div className={`table-center ${game.hand?.trumpColor ? `table-trump-${game.hand.trumpColor}` : ''}`}><p className="turn-label">{game.hand?.phase === 'bidding' ? 'Bidding' : 'Winning bid'}</p><strong>{game.hand?.phase === 'bidding' ? game.hand.currentBid ?? 'No bid' : `Team ${bidder?.team ?? '—'}`}</strong><small>{game.hand?.phase === 'bidding' ? `${currentPlayer?.name ?? 'Player'} is up` : `${game.hand?.currentBid ?? '—'} points · ${game.hand?.trumpColor ? `Trump: ${game.hand.trumpColor}` : 'Trump pending'}`}</small></div><TableCards trick={tableTrick} players={game.players} />{game.players.map((player, index) => { const bid = latestBids.get(player.id); return <div className={`player-position player-${index} ${player.id === currentUserId ? 'is-you' : ''}`} key={player.id}><Avatar label={player.name} color={avatarColors[index]} />{player.id === dealer?.id && <span className="dealer-chip">Dealer</span>}<span>{player.name}{player.id === currentUserId ? ' · You' : ''}</span><small>Team {player.team}{player.isAi ? ' · AI' : ''}</small>{game.hand?.phase === 'bidding' && <span className={`table-bid-status ${player.id === currentPlayer?.id ? 'bidding-now' : ''}`}>{player.id === currentPlayer?.id && 'Bidding'}{player.id !== currentPlayer?.id && bid && (bid.passed ? 'Passed' : `Bid ${bid.amount}`)}{player.id !== currentPlayer?.id && !bid && 'Not bid'}</span>}</div> })}</section>
+    <section className="game-board"><div className={`table-center ${game.hand?.trumpColor ? `table-trump-${game.hand.trumpColor}` : ''}`}><p className="turn-label">{game.hand?.phase === 'bidding' ? 'Bidding' : 'Winning bid'}</p><strong>{game.hand?.phase === 'bidding' ? game.hand.currentBid ?? 'No bid' : `Team ${bidder?.team ?? '—'}`}</strong><small>{game.hand?.phase === 'bidding' ? `${currentPlayer?.name ?? 'Player'} is up` : `${game.hand?.currentBid ?? '—'} points · ${game.hand?.trumpColor ? `Trump: ${game.hand.trumpColor}` : 'Trump pending'}`}</small></div><KittyDisplay hand={game.hand} bidderIndex={visualPosition(game.players.findIndex((player) => player.id === bidder?.id))} />{showShuffle && <ShuffleAnimation />}<TableCards trick={tableTrick} players={game.players} visualPosition={visualPosition} />{game.players.map((player, index) => { const bid = latestBids.get(player.id); const position = visualPosition(index); return <div className={`player-position player-${position} ${player.id === currentUserId ? 'is-you' : ''}`} key={player.id}><Avatar label={player.name} color={avatarColors[index]} />{player.id === dealer?.id && <span className="dealer-chip">Dealer</span>}<span>{player.name}{player.id === currentUserId ? ' · You' : ''}</span><small>Team {player.team}{player.isAi ? ' · AI' : ''}</small>{game.hand?.phase === 'bidding' && <span className={`table-bid-status ${player.id === currentPlayer?.id ? 'bidding-now' : ''}`}>{player.id === currentPlayer?.id && 'Bidding'}{player.id !== currentPlayer?.id && bid && (bid.passed ? 'Passed' : `Bid ${bid.amount}`)}{player.id !== currentPlayer?.id && !bid && 'Not bid'}</span>}</div> })}</section>
     {game.hand?.phase === 'trump' && <section className="action-panel"><p className="eyebrow">Trump selection</p><h2>{isBidder ? 'Which color will be trump?' : `${bidder?.name ?? 'The winning bidder'} is choosing trump`}</h2>{isBidder ? <div className="color-actions">{availableTrumpColors.map((color) => <button className={`color-choice color-${color}`} key={color} onClick={() => onTrump(color)}>{color}</button>)}</div> : <p className="muted-note">The winning bidder chooses a color they still hold.</p>}</section>}
     <section className="hand-panel"><div className="hand-heading"><div><p className="eyebrow">Your hand</p><h2>{me?.hand.length ?? 0} cards</h2></div>{game.hand?.phase === 'bidding' && <span className="bid-status">{isMyTurn ? 'Choose a bid' : `Waiting for ${currentPlayer?.name ?? 'player'}`}</span>}{game.hand?.phase === 'kitty' && isBidder && <span className="bid-status">{selectedDiscard.length}/5 selected</span>}{game.hand?.phase === 'playing' && <span className="bid-status">{isMyTurn ? 'Choose a legal card' : `Waiting for ${currentPlayer?.name ?? 'player'}`}</span>}</div><div className="hand-cards">{sortHand(me?.hand ?? []).map((card) => <CardView key={card.id} card={card} selected={selectedDiscard.includes(card.id)} onClick={game.hand?.phase === 'kitty' && isBidder ? () => toggleDiscard(card) : game.hand?.phase === 'playing' && isMyTurn && legalCardIds.has(card.id) ? () => onCard(card.id) : undefined} />)}</div>{game.hand?.phase === 'bidding' && <div className="bid-controls"><button className="pass-button" disabled={!isMyTurn} onClick={() => onBid(null)}>Pass</button><div className="bid-options">{bidOptions.map((bid) => <button key={bid} disabled={!isMyTurn} onClick={() => onBid(bid)}>{bid}</button>)}</div></div>}{game.hand?.phase === 'kitty' && isBidder && <button className="button primary discard-button" disabled={selectedDiscard.length !== 5} onClick={() => { onDiscard(selectedDiscard); setSelectedDiscard([]) }}>Discard selected cards →</button>}</section>
     {(game.hand?.phase === 'playing' || game.hand?.phase === 'complete') && <TrickPanel trick={lastTrick} players={game.players} completed />}
@@ -273,10 +305,24 @@ function GameResult({ game, currentUserId, isHost, onRematch, onCloseLobby }: { 
   return <section className={`game-result ${won ? 'game-won' : 'game-lost'}`}>{won && <div className="confetti" aria-hidden>{confetti.map((piece) => <i key={piece.id} style={{ left: piece.left, animationDelay: piece.delay, background: piece.color, transform: `rotate(${piece.rotation})` }} />)}</div>}<div className="result-icon">{won ? '★' : '○'}</div><p className="eyebrow">Game complete</p><h2>Team {game.hand?.gameWinner} wins</h2><p>{won ? 'You took the table. Nice work.' : 'The cards had other plans this time.'}</p>{isHost ? <div className="result-actions"><button className="button primary" onClick={onRematch}>Rematch →</button><button className="secondary-button" onClick={onCloseLobby}>Close lobby</button></div> : <p className="muted-note">Waiting for the table leader to choose a rematch or close the lobby.</p>}</section>
 }
 
-function TableCards({ trick, players }: { trick?: { cards: Array<{ playerId: string; card: Card }> }; players: SessionState['players'] }) {
-  if (!trick?.cards.length) return <div className="table-empty">Cards played this trick will appear here.</div>
-  return <div className="table-cards"><p className="table-label">Table · current trick</p>{trick.cards.map(({ playerId, card }) => { const playerIndex = players.findIndex((player) => player.id === playerId); return <div className={`table-card-play table-card-position-${playerIndex}`} key={`${playerId}-${card.id}`}><CardView card={card} /></div> })}</div>
+function TableCards({ trick, players, visualPosition, game, completed = Boolean(trick?.cards.length === 4) }: { trick?: { cards: Array<{ playerId: string; card: Card }>; winnerId?: string }; players: SessionState['players']; visualPosition: (index: number) => number; game?: SessionState; completed?: boolean }) {
+  if (!trick?.cards.length) return <>{game && <TableHandPoints game={game} />}<div className="table-empty">Cards played this trick will appear here.</div></>
+  const winnerIndex = players.findIndex((player) => player.id === trick.cards.find((played) => played.playerId === trick.winnerId)?.playerId)
+  return <>{game && <TableHandPoints game={game} />}<div className={`table-cards ${completed ? 'trick-capture' : ''}`}><p className="table-label">Table · current trick</p>{trick.cards.map(({ playerId, card }) => { const playerIndex = visualPosition(players.findIndex((player) => player.id === playerId)); return <div className={`table-card-play table-card-position-${playerIndex} capture-target-${visualPosition(winnerIndex)}`} key={`${playerId}-${card.id}`}><CardView card={card} /></div> })}</div></>
 }
+
+function KittyDisplay({ hand, bidderIndex }: { hand?: SessionState['hand']; bidderIndex: number }) {
+  const cards = hand?.phase === 'bidding' ? Array.from({ length: 5 }) : hand?.kittyReveal ?? []
+  if (!cards.length) return null
+  return <div className={`kitty-display ${hand?.phase !== 'bidding' ? `kitty-flying kitty-target-${bidderIndex}` : ''}`} aria-label="Kitty"><span className="kitty-label">Kitty</span><div className="kitty-stack">{cards.map((_, index) => <div className="kitty-card" key={index}><span>●</span></div>)}</div></div>
+}
+
+function TableHandPoints({ game }: { game: SessionState }) {
+  return <div className="table-hand-points"><span>Hand points</span><strong>A {capturedPointsForTeam(game, 'A')}</strong><strong>B {capturedPointsForTeam(game, 'B')}</strong><small>/ 110</small></div>
+}
+
+function ShuffleAnimation() { return null }
+
 
 function BidHistory({ game, currentPlayerId }: { game: SessionState; currentPlayerId?: string }) {
   const bids = game.hand?.bids ?? []

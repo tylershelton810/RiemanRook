@@ -79,6 +79,12 @@ input, button, select { font-size: 16px; }
 .scoreboard strong { color: var(--green); font: 700 28px 'Fraunces'; margin-top: 4px; }
 .game-board { min-height: 520px; position: relative; border-radius: 24px; background: #dcefe8; border: 10px solid #fff; box-shadow: 0 8px 20px #286b6214; overflow: hidden; display: grid; place-items: center; }
 .table-center { position: absolute; left: 24px; top: 24px; width: 150px; height: 150px; border-radius: 50%; background: #b9ddd2; border: 2px dashed #73ae9f; display: grid; place-content: center; text-align: center; color: var(--green); padding: 18px; z-index: 2; }
+.game-shell { position: relative; }
+.game-shell > .table-hand-points { position: absolute; right: 58px; top: 318px; z-index: 8; display: flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid #a5d0c4; border-radius: 9px; background: #ffffffdd; color: #66817b; font: 9px 'DM Mono'; text-transform: uppercase; }
+.bid-banner { position: relative; }
+.bid-banner > .table-hand-points { position: absolute; right: 18px; bottom: -11px; z-index: 8; display: flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid #a5d0c4; border-radius: 9px; background: #ffffffdd; color: #66817b; font: 9px 'DM Mono'; text-transform: uppercase; }
+.table-hand-points strong { color: var(--green); }
+.table-hand-points small { color: #9aadaa; }
 .table-mark { margin: 0 auto 10px; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px 12px 12px 3px; background: var(--coral); color: #fff; font: 700 18px 'DM Mono'; transform: rotate(-6deg); }
 .turn-label { margin: 0 0 4px; font: 10px 'DM Mono'; text-transform: uppercase; letter-spacing: .1em; color: #4b8277; }
 .table-center strong { font: 700 20px 'Fraunces'; }
@@ -97,7 +103,38 @@ input, button, select { font-size: 16px; }
 .table-card-position-1 { right: 24%; top: 50%; transform: translateY(-50%) rotate(90deg); }
 .table-card-position-2 { left: 50%; top: 24%; transform: translateX(-50%) rotate(180deg); }
 .table-card-position-3 { left: 24%; top: 50%; transform: translateY(-50%) rotate(270deg); }
+.trick-capture .table-card-play { animation-duration: .55s; animation-delay: .5s; animation-timing-function: ease-in; animation-fill-mode: forwards; }
+.trick-capture .capture-target-0 { animation-name: capture-to-bottom; }
+.trick-capture .capture-target-1 { animation-name: capture-to-right; }
+.trick-capture .capture-target-2 { animation-name: capture-to-top; }
+.trick-capture .capture-target-3 { animation-name: capture-to-left; }
+@keyframes capture-to-bottom { to { transform: translate(-50%, 155px) scale(.45) rotate(0deg); opacity: 0; } }
+@keyframes capture-to-right { to { transform: translate(155px, -50%) scale(.45) rotate(90deg); opacity: 0; } }
+@keyframes capture-to-top { to { transform: translate(-50%, -155px) scale(.45) rotate(180deg); opacity: 0; } }
+@keyframes capture-to-left { to { transform: translate(-155px, -50%) scale(.45) rotate(270deg); opacity: 0; } }
 .table-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #75a89c; font: 10px 'DM Mono'; text-transform: uppercase; text-align: center; z-index: 1; }
+.kitty-display { position: absolute; right: 22px; top: 24px; z-index: 3; text-align: center; }
+.kitty-label { display: block; margin-bottom: 5px; color: #4f8d7e; font: 9px 'DM Mono'; text-transform: uppercase; }
+.kitty-stack { position: relative; width: 48px; height: 68px; }
+.kitty-card { position: absolute; inset: 0; display: grid; place-items: center; border: 2px solid #fff; border-radius: 8px; background: #286b62; box-shadow: 0 3px 0 #174c45; color: #f6d88c; }
+.kitty-card span { width: 31px; height: 46px; display: grid; place-items: center; border: 1px dashed #f6d88c; border-radius: 5px; font-size: 16px; }
+.kitty-card:nth-child(2) { transform: translate(-3px, 3px) rotate(-4deg); }
+.kitty-card:nth-child(3) { transform: translate(-1px, 2px) rotate(3deg); }
+.kitty-card:nth-child(4) { transform: translate(2px, 1px) rotate(-2deg); }
+.kitty-card:nth-child(5) { transform: translate(4px, 0) rotate(4deg); }
+.kitty-flying { animation: kitty-fly-in .7s ease-out forwards; }
+@keyframes kitty-fly-in { from { transform: translate(0, 0) scale(1); opacity: 1; } to { transform: translate(var(--kitty-x, -210px), var(--kitty-y, 80px)) scale(.55); opacity: .2; } }
+.kitty-target-0 { --kitty-x: -180px; --kitty-y: 170px; }
+.kitty-target-1 { --kitty-x: -300px; --kitty-y: 15px; }
+.kitty-target-2 { --kitty-x: -180px; --kitty-y: -160px; }
+.kitty-target-3 { --kitty-x: 160px; --kitty-y: 15px; }
+.shuffle-animation { position: absolute; left: 50%; top: 50%; z-index: 5; transform: translate(-50%, -50%); width: 120px; height: 90px; display: grid; place-items: center; }
+.shuffle-animation i { position: absolute; width: 42px; height: 60px; border: 3px solid #fff; border-radius: 8px; background: var(--green); box-shadow: 0 4px 0 #174c45; animation: shuffle-card .7s ease-in-out infinite alternate; }
+.shuffle-animation i:nth-child(1) { transform: rotate(-16deg); animation-delay: -.2s; }
+.shuffle-animation i:nth-child(2) { transform: rotate(0); }
+.shuffle-animation i:nth-child(3) { transform: rotate(16deg); animation-delay: .2s; }
+.shuffle-animation span { position: absolute; top: 70px; color: var(--green); font: 9px 'DM Mono'; text-transform: uppercase; }
+@keyframes shuffle-card { to { margin-left: 32px; transform: rotate(18deg) translateY(-8px); } }
 .player-position { position: absolute; display: grid; justify-items: center; gap: 5px; color: var(--ink); font-weight: 600; }
 .dealer-chip { position: absolute; top: -18px; padding: 4px 7px; border-radius: 7px; background: var(--gold); color: #76541b; font: 9px 'DM Mono'; text-transform: uppercase; letter-spacing: .05em; box-shadow: 0 2px 0 #b47e26; }
 .table-bid-status { min-width: 62px; padding: 4px 6px; border-radius: 6px; background: #eef5f2; color: #6d8580; font: 8px 'DM Mono'; text-align: center; text-transform: uppercase; }
@@ -209,6 +246,7 @@ input, button, select { font-size: 16px; }
   .hand-points small { margin-left: 0; }
   .game-board { min-height: 300px; height: 300px; border-width: 6px; border-radius: 16px; }
   .table-center { left: 10px; top: 10px; width: 92px; height: 92px; padding: 9px; }
+  .bid-banner > .table-hand-points { right: 8px; bottom: -10px; gap: 4px; padding: 5px 6px; font-size: 7px; }
   .table-center strong { font-size: 16px; }
   .table-center small { font-size: 8px; line-height: 1.25; }
   .turn-label { font-size: 8px; }

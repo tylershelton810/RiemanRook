@@ -100,6 +100,26 @@ export async function getLobbySnapshot(lobbyId: string) {
   return seats
 }
 
+export async function recoverLatestLobby(userId: string) {
+  const client = requireClient()
+  const { data: membership, error: membershipError } = await client
+    .from('lobby_players')
+    .select('lobby_id, connected_at')
+    .eq('user_id', userId)
+    .order('connected_at', { ascending: false })
+    .limit(10)
+  if (membershipError) throw membershipError
+  for (const row of membership ?? []) {
+    const { data: lobby, error } = await client.from('lobbies')
+      .select('id, join_code, host_id, status, settings')
+      .eq('id', row.lobby_id)
+      .in('status', ['waiting', 'in_progress'])
+      .maybeSingle()
+    if (!error && lobby) return lobby as { id: string; join_code: string; host_id: string; status: string; settings: { turnTimer?: number; winningScore?: number } }
+  }
+  return null
+}
+
 export async function addAiSeat(lobbyId: string, hostId: string, seatId: string) {
   const client = requireClient()
   const { data: lobby, error: readError } = await client.from('lobbies').select('seats').eq('id', lobbyId).eq('host_id', hostId).single()

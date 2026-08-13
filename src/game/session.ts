@@ -33,6 +33,7 @@ export function recordBid(session: SessionState, playerId: string, amount: numbe
     const bidder = session.players.find((player) => player.id === session.hand?.bidderId)
     if (!bidder) throw new Error('Winning bidder not found.')
     bidder.hand.push(...session.hand.kitty)
+    session.hand.kittyReveal = [...session.hand.kitty]
     session.hand.kitty = []
     session.hand.phase = 'kitty'
     session.hand.currentPlayerIndex = session.players.findIndex((player) => player.id === session.hand?.bidderId)
@@ -62,6 +63,7 @@ export function discardKitty(session: SessionState, playerId: string, cardIds: s
   if (selected.length !== 5) throw new Error('All discarded cards must be in your hand.')
   if (selected.some((card) => card.kind === 'crow' || (card.kind === 'number' && [5, 10, 14].includes(card.value)))) throw new Error('Point cards cannot be discarded.')
   player.hand = player.hand.filter((card) => !cardIds.includes(card.id))
+  session.hand.kittyReveal = undefined
   session.hand.phase = 'trump'
   return session
 }

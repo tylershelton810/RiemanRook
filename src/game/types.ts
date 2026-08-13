@@ -63,6 +63,7 @@ export interface HandState {
   trumpColor?: CardColor
   bids: BidState[]
   kitty: Card[]
+  kittyReveal?: Card[]
   tricks: Trick[]
   completed: boolean
   teamPoints?: Record<Team, number>
