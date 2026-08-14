@@ -212,15 +212,15 @@ input, button, select { font-size: 16px; }
 .trick-card { display: grid; justify-items: center; gap: 5px; }
 .trick-card small, .trick-winner { color: var(--muted); font-size: 10px; }
 .trick-winner { margin: 13px 0 0; }
-.color-black { background: #cdd9dd; border-color: #9eafb5; }
+.color-black { background: #cdd9dd; border-color: #9eafb5; --card-accent: #9eafb5; }
 .color-black small { color: #4a5b63; }
-.color-red { background: #ffcfc4; border-color: #e98a7a; }
+.color-red { background: #ffcfc4; border-color: #e98a7a; --card-accent: #e98a7a; }
 .color-red strong, .color-red small { color: #b85345; }
-.color-yellow { background: #f8e2a4; border-color: #e0b95e; }
+.color-yellow { background: #f8e2a4; border-color: #e0b95e; --card-accent: #e0b95e; }
 .color-yellow strong, .color-yellow small { color: #8f6618; }
-.color-green { background: #c6e4d9; border-color: #8bbfae; }
+.color-green { background: #c6e4d9; border-color: #8bbfae; --card-accent: #8bbfae; }
 .color-green strong, .color-green small { color: #256b5c; }
-.crow-card { background: var(--coral); border-color: #d85f51; color: #fff; }
+.crow-card { background: var(--coral); border-color: #d85f51; color: #fff; --card-accent: #d85f51; }
 .crow-card strong, .crow-card small { color: #fff; }
 .bid-controls { display: flex; align-items: center; gap: 13px; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
 .bid-controls button { min-width: 42px; border: 1px solid #b9d3cb; border-radius: 8px; background: #f1f8f5; padding: 9px 11px; color: var(--green); font: 600 12px 'DM Mono'; cursor: pointer; }
@@ -350,10 +350,12 @@ footer { color: #91a09f; }
 .anim-grid .crow-logo-name { font: 10px 'DM Mono'; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .anim-preview { width: 44px; height: 62px; }
 .anim-preview strong { font-size: 19px; }
-.card-anim-pulse { animation: card-pulse 2s ease-in-out infinite; }
-@keyframes card-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); box-shadow: 0 3px 0 #286b6240, 0 0 0 5px #286b6218; } }
-.card-anim-wiggle { animation: card-wiggle 1.6s ease-in-out infinite; transform-origin: 50% 100%; }
-@keyframes card-wiggle { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-3deg); } 75% { transform: rotate(3deg); } }
+.card-anim-pulse { position: relative; }
+.card-anim-pulse::after { content: ''; position: absolute; inset: -4px; border-radius: 13px; border: 3px solid var(--card-accent); opacity: 0; animation: card-pulse 1.8s ease-out infinite; pointer-events: none; }
+@keyframes card-pulse { 0% { transform: scale(.88); opacity: 0; } 45% { opacity: .85; } 80%, 100% { transform: scale(1.16); opacity: 0; } }
+.card-anim-wiggle { position: relative; }
+.card-anim-wiggle::before { content: ''; position: absolute; inset: -6px; border: 2px dashed var(--card-accent); border-radius: 15px; animation: card-wiggle .5s ease-in-out infinite; pointer-events: none; }
+@keyframes card-wiggle { 0%, 100% { transform: rotate(0) translateX(0); } 25% { transform: rotate(-2.5deg) translateX(-2px); } 75% { transform: rotate(2.5deg) translateX(2px); } }
 .card-anim-shine { position: relative; overflow: hidden; }
 .card-anim-shine::after { content: ''; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, .6) 50%, transparent 60%); transform: translateX(-120%); animation: card-shine 3.2s ease-in-out infinite; }
 @keyframes card-shine { 0% { transform: translateX(-120%); } 55%, 100% { transform: translateX(120%); } }
