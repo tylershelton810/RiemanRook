@@ -8,7 +8,7 @@ export interface LobbyMemberRow {
   team: 'A' | 'B'
   is_host: boolean
   connected_at: string
-  profile?: { display_name: string } | { display_name: string }[] | null
+  profile?: { display_name: string; crow_logo?: string | null } | { display_name: string; crow_logo?: string | null }[] | null
 }
 
 export interface LobbyRecord {
@@ -98,9 +98,21 @@ export async function findLobbyByCode(code: string) {
 
 export async function getLobbyMembers(lobbyId: string) {
   const client = requireClient()
-  const { data, error } = await client.from('lobby_players').select('lobby_id, user_id, seat_index, team, is_host, connected_at, profile:profiles(display_name)').eq('lobby_id', lobbyId).order('seat_index')
+  const { data, error } = await client.from('lobby_players').select('lobby_id, user_id, seat_index, team, is_host, connected_at, profile:profiles(display_name, crow_logo)').eq('lobby_id', lobbyId).order('seat_index')
   if (error) throw error
   return (data ?? []) as LobbyMemberRow[]
+}
+
+export async function getLobbyMemberLogos(lobbyId: string) {
+  const client = requireClient()
+  const { data, error } = await client.from('lobby_players').select('user_id, profile:profiles(crow_logo)').eq('lobby_id', lobbyId)
+  if (error) throw error
+  const logos: Record<string, string | null> = {}
+  ;(data ?? []).forEach((row) => {
+    const profile = Array.isArray(row.profile) ? row.profile[0] : row.profile
+    logos[row.user_id] = profile?.crow_logo ?? null
+  })
+  return logos
 }
 
 export async function joinLobby(lobbyId: string, userId: string) {
@@ -115,7 +127,7 @@ export async function joinLobby(lobbyId: string, userId: string) {
   return getLobbyMembers(lobbyId)
 }
 
-export async function getLobbySnapshot(lobbyId: string) {
+async function loadLobbySeats(lobbyId: string) {
   const client = requireClient()
   const [{ data: lobby, error: lobbyError }, members] = await Promise.all([
     client.from('lobbies').select('seats').eq('id', lobbyId).single(),
@@ -128,6 +140,50 @@ export async function getLobbySnapshot(lobbyId: string) {
     if (seat.status === 'ai') seats[Number(seat.id.replace('seat-', ''))] = seat
   })
   return seats
+}
+
+export async function getLobbySnapshot(lobbyId: string) {
+  return loadLobbySeats(lobbyId)
+}
+
+async function persistSeatModel(lobbyId: string, hostId: string, seats: LobbySeat[]) {
+  const client = requireClient()
+  const storedSeats = seats.map((seat, index) => seat.status === 'human'
+    ? seat
+    : { ...seat, id: `seat-${index}` })
+  const { error: seatsError } = await client.from('lobbies').update({ seats: storedSeats }).eq('id', lobbyId).eq('host_id', hostId)
+  if (seatsError) throw seatsError
+  for (let index = 0; index < seats.length; index += 1) {
+    const seat = seats[index]
+    if (seat.status !== 'human') continue
+    const { error } = await client.from('lobby_players').update({ seat_index: index, team: seat.team }).eq('lobby_id', lobbyId).eq('user_id', seat.id)
+    if (error) throw error
+  }
+}
+
+export async function swapSeats(lobbyId: string, hostId: string, firstId: string, secondId: string) {
+  if (firstId === secondId) return loadLobbySeats(lobbyId)
+  const seats = await loadLobbySeats(lobbyId)
+  const firstIndex = seats.findIndex((seat) => seat.id === firstId)
+  const secondIndex = seats.findIndex((seat) => seat.id === secondId)
+  if (firstIndex === -1 || secondIndex === -1) throw new Error('That seat is no longer available.')
+  const teamForIndex = (index: number): 'A' | 'B' => index % 2 === 0 ? 'A' : 'B'
+  const swapped = seats.map((seat, index) => {
+    if (index === firstIndex) return { ...seats[secondIndex], team: teamForIndex(firstIndex) }
+    if (index === secondIndex) return { ...seats[firstIndex], team: teamForIndex(secondIndex) }
+    return seat
+  })
+  await persistSeatModel(lobbyId, hostId, swapped)
+  return loadLobbySeats(lobbyId)
+}
+
+export async function setSeatTeam(lobbyId: string, hostId: string, seatId: string, team: 'A' | 'B') {
+  const seats = await loadLobbySeats(lobbyId)
+  const index = seats.findIndex((seat) => seat.id === seatId)
+  if (index === -1) throw new Error('That seat is no longer available.')
+  const updated = seats.map((seat, seatIndex) => seatIndex === index ? { ...seat, team } : seat)
+  await persistSeatModel(lobbyId, hostId, updated)
+  return loadLobbySeats(lobbyId)
 }
 
 export async function getMyLobbies(userId: string) {
