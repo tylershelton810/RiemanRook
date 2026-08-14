@@ -125,8 +125,8 @@ export function playCard(session: SessionState, playerId: string, cardId: string
     session.hand.bidMade = madeBid
     session.hand.scoreDelta = scoreDelta
     updateHandStats(session, bidderTeam, madeBid)
-    const aOver = session.scores.A > session.winningScore
-    const bOver = session.scores.B > session.winningScore
+    const aOver = session.scores.A >= session.winningScore
+    const bOver = session.scores.B >= session.winningScore
     if (aOver || bOver) {
       session.status = 'completed'
       session.hand.gameWinner = aOver && bOver ? bidderTeam : aOver ? 'A' : 'B'

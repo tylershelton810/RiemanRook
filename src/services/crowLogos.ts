@@ -7,6 +7,13 @@ export interface CrowLogoRecord {
   created_at?: string
 }
 
+export interface CrowWallet {
+  tokens: number
+  purchasedCrowLogos: string[]
+  purchasedCardAnimations: string[]
+  cardAnimation: string | null
+}
+
 const BUCKET = 'crow-logos'
 
 function requireClient() {
@@ -21,10 +28,29 @@ export async function getMyCrowLogo(userId: string): Promise<string | null> {
   return data?.crow_logo ?? null
 }
 
+export async function getMyWallet(userId: string): Promise<CrowWallet> {
+  const client = requireClient()
+  const { data, error } = await client.from('profiles').select('tokens, purchased_crow_logos, purchased_card_animations, card_animation').eq('id', userId).maybeSingle()
+  if (error) throw error
+  return {
+    tokens: data?.tokens ?? 0,
+    purchasedCrowLogos: data?.purchased_crow_logos ?? [],
+    purchasedCardAnimations: data?.purchased_card_animations ?? [],
+    cardAnimation: data?.card_animation ?? null,
+  }
+}
+
 export async function setCrowLogo(userId: string, logoId: string | null) {
   const client = requireClient()
-  const { error } = await client.from('profiles').update({ crow_logo: logoId }).eq('id', userId)
+  const { error } = await client.rpc('select_crow_logo', { p_logo_id: logoId })
   if (error) throw error
+}
+
+export async function purchaseCrowLogo(logoId: string): Promise<number> {
+  const client = requireClient()
+  const { data, error } = await client.rpc('purchase_crow_logo', { p_logo_id: logoId })
+  if (error) throw error
+  return data as number
 }
 
 export async function listCrowLogos(): Promise<CrowLogoRecord[]> {

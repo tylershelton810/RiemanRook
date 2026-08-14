@@ -318,6 +318,8 @@ footer { color: #91a09f; }
 /* Crow logo settings */
 .settings-button { margin-left: 8px; border: 1px solid #c4d2ce; border-radius: 8px; background: #fff; color: var(--green); padding: 7px 10px; font: 600 10px 'DM Mono'; text-transform: uppercase; cursor: pointer; }
 .settings-button:hover { background: #f1f8f5; }
+.token-chip { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; border: 1px solid #d8c9a3; border-radius: 20px; background: #f6efdf; color: #8a6a2f; padding: 5px 10px; font: 600 11px 'DM Mono'; }
+.token-balance { display: inline-flex; align-items: center; gap: 8px; margin-top: 16px; width: max-content; padding: 10px 16px; border: 1px solid #d8c9a3; border-radius: 24px; background: #f6efdf; color: #8a6a2f; font: 600 14px 'DM Mono'; }
 .settings-shell { padding-bottom: 40px; }
 .settings-header { padding: 58px 0 24px; }
 .settings-header h1 { margin: 0; font: 700 clamp(40px, 6vw, 62px)/.98 'Fraunces', 'Playfair Display', serif; letter-spacing: -.05em; }
@@ -330,12 +332,36 @@ footer { color: #91a09f; }
 .crow-logo-option { display: grid; justify-items: center; gap: 8px; padding: 13px 8px 11px; border: 2px solid #dce7e3; border-radius: 12px; background: #fbfdfb; cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
 .crow-logo-option:hover { border-color: #b9d3cb; transform: translateY(-2px); }
 .crow-logo-option.selected { border-color: var(--green); box-shadow: 0 0 0 3px #286b6215; }
-.crow-logo-option > span:last-child { font: 10px 'DM Mono'; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.crow-logo-option > span.crow-logo-name { font: 10px 'DM Mono'; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.crow-logo-price { font: 700 10px 'DM Mono'; text-transform: uppercase; letter-spacing: .04em; }
+.crow-logo-price.owned { color: var(--green); }
+.crow-logo-price.unowned { color: #b07d2c; }
 .crow-card-thumb { width: 40px; height: 56px; display: grid; place-items: center; border-radius: 8px; background: var(--coral); border: 2px solid #d85f51; color: #fff; }
 .crow-card-thumb strong { font: 700 20px 'Fraunces'; color: #fff; }
 .crow-card-thumb .crow-logo-svg, .crow-card-thumb .crow-card-image { width: 26px; height: 26px; }
 .crow-card .crow-logo-svg, .crow-card .crow-card-image { width: 30px; height: 30px; }
 .crow-card-image { object-fit: contain; }
+.shop-section { margin-top: 32px; padding-top: 26px; border-top: 1px solid var(--line); }
+.shop-section-heading h3 { margin: 0 0 10px; font: 700 22px 'Fraunces', 'Playfair Display', serif; }
+.anim-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; margin-top: 18px; }
+.anim-grid button { display: grid; justify-items: center; gap: 8px; padding: 14px 8px 11px; border: 2px solid #dce7e3; border-radius: 12px; background: #fbfdfb; cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
+.anim-grid button:hover { border-color: #b9d3cb; transform: translateY(-2px); }
+.anim-grid button.selected { border-color: var(--green); box-shadow: 0 0 0 3px #286b6215; }
+.anim-grid .crow-logo-name { font: 10px 'DM Mono'; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.anim-preview { width: 44px; height: 62px; }
+.anim-preview strong { font-size: 19px; }
+.card-anim-pulse { animation: card-pulse 2s ease-in-out infinite; }
+@keyframes card-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); box-shadow: 0 3px 0 #286b6240, 0 0 0 5px #286b6218; } }
+.card-anim-wiggle { animation: card-wiggle 1.6s ease-in-out infinite; transform-origin: 50% 100%; }
+@keyframes card-wiggle { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-3deg); } 75% { transform: rotate(3deg); } }
+.card-anim-shine { position: relative; overflow: hidden; }
+.card-anim-shine::after { content: ''; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, .6) 50%, transparent 60%); transform: translateX(-120%); animation: card-shine 3.2s ease-in-out infinite; }
+@keyframes card-shine { 0% { transform: translateX(-120%); } 55%, 100% { transform: translateX(120%); } }
+.card-anim-sparkle { position: relative; }
+.card-anim-sparkle::before, .card-anim-sparkle::after { content: '✦'; position: absolute; font-size: 9px; color: var(--gold); opacity: 0; animation: card-sparkle 2s ease-in-out infinite; }
+.card-anim-sparkle::before { top: 3px; right: 4px; animation-delay: .3s; }
+.card-anim-sparkle::after { bottom: 6px; left: 4px; font-size: 7px; animation-delay: 1s; }
+@keyframes card-sparkle { 0%, 100% { opacity: 0; transform: scale(.4) rotate(0deg); } 50% { opacity: 1; transform: scale(1) rotate(40deg); } }
 .upload-row { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
 .upload-error { margin: 10px 0 0; color: var(--coral); font-size: 12px; }
 .upload-row .small-help { margin-top: 10px; }

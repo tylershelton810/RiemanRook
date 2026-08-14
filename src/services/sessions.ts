@@ -75,6 +75,8 @@ async function updateGameState(sessionId: string, state: SessionState) {
     // The result screen must not depend on statistics finalization succeeding.
     // The RPC is idempotent and can be retried independently.
     try { await supabase.rpc('finalize_session_statistics', { p_session_id: sessionId }) } catch { /* result state is already persisted */ }
+    // Tokens are awarded even when AI sat at the table. Idempotent via tokens_applied.
+    try { await supabase.rpc('award_tokens_for_completed_game', { p_session_id: sessionId }) } catch { /* award can be retried later */ }
   }
   return data.game_state as SessionState & { turnTimer: number }
 }
@@ -98,7 +100,7 @@ export async function dealNextHand(sessionId: string, state: SessionState) {
 export async function rematchSession(sessionId: string, lobbyId: string, state: SessionState) {
   if (!supabase) throw new Error('Supabase is not configured.')
   const rematchState = { ...state, status: 'active' as const, scores: { A: 0, B: 0 }, handNumber: 0, stats: Object.fromEntries(state.players.map((player) => [player.id, { handsPlayed: 0, handsBid: 0, winningBids: 0, colors: {}, partners: {} }])) }
-  const { data, error } = await supabase.from('game_sessions').update({ status: 'active', game_state: rematchState, completed_at: null }).eq('id', sessionId).select('game_state').single()
+  const { data, error } = await supabase.from('game_sessions').update({ status: 'active', game_state: rematchState, completed_at: null, statistics_applied: false, tokens_applied: false }).eq('id', sessionId).select('game_state').single()
   if (error) throw error
   const { error: lobbyError } = await supabase.from('lobbies').update({ status: 'in_progress' }).eq('id', lobbyId)
   if (lobbyError) throw lobbyError
