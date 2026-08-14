@@ -3,8 +3,9 @@ import type { FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import type { Difficulty, LobbySeat } from './lib/types'
-import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getLobbySnapshot, getLobbyMembers, joinLobby, membersToSeats, recoverLatestLobby, updateLobbySettings } from './services/lobbies'
-import { closeLobby, dealNextHand, getActiveGameSession, getCurrentGameSession, getPlayerStatistics, rematchSession, startGameSession, submitBid, submitTrump, submitDiscard, submitCard } from './services/sessions'
+import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getLobbySnapshot, getLobbyMembers, getMyLobbies, joinLobby, leaveLobby, membersToSeats, updateLobbyName, updateLobbySettings } from './services/lobbies'
+import type { LobbySummary } from './services/lobbies'
+import { closeLobby, dealNextHand, getActiveGameSession, getCurrentGameSession, getPlayerStatistics, reconcileAiSeats, rematchSession, startGameSession, submitBid, submitTrump, submitDiscard, submitCard } from './services/sessions'
 import { createConfetti } from './game/celebration'
 import type { Card, SessionState } from './game/types'
 import type { CardColor } from './game/types'
@@ -18,6 +19,12 @@ function Avatar({ label, color = 'coral' }: { label: string; color?: string }) {
   return <span className={`avatar ${color}`}>{label.slice(0, 1).toUpperCase()}</span>
 }
 
+function teamLabel(team: 'A' | 'B', game: SessionState, currentUserId?: string) {
+  const myTeam = game.players.find((player) => player.id === currentUserId)?.team
+  if (!myTeam) return `Team ${team}`
+  return myTeam === team ? 'Us' : 'Them'
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured)
@@ -28,6 +35,8 @@ function App() {
   const [name] = useState('Tyler')
   const [joinCode, setJoinCode] = useState('')
   const [lobbyCode, setLobbyCode] = useState('CROW-7K2P')
+  const [lobbyName, setLobbyName] = useState('')
+  const [myLobbies, setMyLobbies] = useState<LobbySummary[]>([])
   const [activeLobbyId, setActiveLobbyId] = useState<string | null>(null)
   const [activeLobbyHostId, setActiveLobbyHostId] = useState<string | null>(null)
   const [toast, setToast] = useState('')
@@ -55,7 +64,9 @@ function App() {
   const filled = seats.filter((seat) => seat.status !== 'open').length
   const showToast = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2800) }
   const signOut = async () => {
+    console.log('signing out')
     if (!supabase) return
+    console.log('signing out supabase')
     const { error } = await supabase.auth.signOut()
     if (error) showToast(`Sign out failed: ${error.message}`)
   }
@@ -69,19 +80,12 @@ function App() {
   const setDifficulty = (id: string, difficulty: Difficulty) => setSeats((current) => current.map((seat) => seat.id === id ? { ...seat, difficulty } : seat))
   const displaySeats = useMemo(() => seats.map((seat, index) => ({ ...seat, color: avatarColors[index] })), [seats])
 
-  useEffect(() => {
-    if (!session?.user) return
-    ensureProfile(session.user.id, session.user.email).catch((error) => showToast(error.message))
-  }, [session])
-
-  useEffect(() => {
-    if (!session?.user || activeLobbyId) return
-    let cancelled = false
-    recoverLatestLobby(session.user.id).then(async (lobby) => {
-      if (!lobby || cancelled) return
+  const rejoinLobby = async (lobby: LobbySummary, shouldAbort: () => boolean = () => false) => {
+    try {
       const recoveredSeats = await getLobbySnapshot(lobby.id)
-      if (cancelled) return
+      if (shouldAbort()) return
       setLobbyCode(lobby.join_code)
+      setLobbyName(lobby.name ?? '')
       setActiveLobbyId(lobby.id)
       setActiveLobbyHostId(lobby.host_id)
       setSeats(recoveredSeats)
@@ -89,17 +93,50 @@ function App() {
       setWinningScore(lobby.settings?.winningScore ?? 500)
       if (lobby.status === 'in_progress') {
         const currentSession = await getCurrentGameSession(lobby.id)
-        if (currentSession && !cancelled) {
+        if (shouldAbort()) return
+        if (currentSession) {
+          let gameState = currentSession.game_state
+          if (session?.user && session.user.id === lobby.host_id && currentSession.status === 'active') {
+            const reconciled = await reconcileAiSeats(lobby.id, lobby.host_id)
+            if (shouldAbort()) return
+            gameState = reconciled ?? gameState
+          }
           setActiveGameSessionId(currentSession.id)
-          setActiveGame(currentSession.game_state)
+          setActiveGame(gameState)
           setView('game')
+        } else {
+          setView('lobby')
         }
-      } else if (!cancelled) {
+      } else {
         setView('lobby')
       }
-    }).catch(() => undefined)
-    return () => { cancelled = true }
-  }, [session, activeLobbyId])
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to rejoin that table.') }
+  }
+
+  const leaveLobbyFor = async (lobby: LobbySummary) => {
+    if (!session?.user) return
+    try {
+      await leaveLobby(lobby.id, session.user.id)
+      setMyLobbies((current) => current.filter((item) => item.id !== lobby.id))
+      if (activeLobbyId === lobby.id) {
+        setActiveLobbyId(null)
+        setActiveLobbyHostId(null)
+        setActiveGameSessionId(null)
+        setActiveGame(null)
+      }
+      showToast('You left the table.')
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to leave that table.') }
+  }
+
+  useEffect(() => {
+    if (!session?.user) return
+    ensureProfile(session.user.id, session.user.email).catch((error) => showToast(error.message))
+  }, [session])
+
+  useEffect(() => {
+    if (!session?.user || view !== 'home') return
+    getMyLobbies(session.user.id).then(setMyLobbies).catch(() => undefined)
+  }, [session, view, activeLobbyId])
 
   useEffect(() => {
     if (!session?.user) return
@@ -118,10 +155,20 @@ function App() {
           setActiveGame(started.game_state)
           setView('game')
         }
+        if (started?.status === 'active' && session?.user && activeLobbyHostId && session.user.id === activeLobbyHostId) {
+          const reconciled = await reconcileAiSeats(activeLobbyId, activeLobbyHostId)
+          if (reconciled) {
+            setActiveGameSessionId(started.id)
+            setActiveGame(reconciled)
+            setView('game')
+          }
+        }
       } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to refresh the lobby.') }
     }
     refreshMembers()
-    const onLobbyChange = (payload: { new?: { status?: string } }) => {
+    const onLobbyChange = (payload: { new?: { status?: string; host_id?: string; name?: string } }) => {
+      if (payload.new?.host_id) setActiveLobbyHostId(payload.new.host_id)
+      if (payload.new?.name) setLobbyName(payload.new.name)
       refreshMembers()
       if (payload.new?.status === 'in_progress') {
         getCurrentGameSession(activeLobbyId).then((sessionState) => {
@@ -139,7 +186,7 @@ function App() {
       .subscribe()
     const refreshTimer = window.setInterval(refreshMembers, 1500)
     return () => { window.clearInterval(refreshTimer); client.removeChannel(channel) }
-  }, [activeLobbyId, activeGameSessionId, activeGame])
+  }, [activeLobbyId, activeGameSessionId, activeGame, session, activeLobbyHostId])
 
   useEffect(() => {
     const hand = activeGame?.hand
@@ -177,10 +224,11 @@ function App() {
       setActiveGameSessionId(null)
       setActiveGame(null)
       await ensureProfile(session.user.id, session.user.email)
-      const lobby = await createLobby(session.user.id)
+      const lobby = await createLobby(session.user.id, lobbyName.trim())
       const snapshot = await getLobbySnapshot(lobby.id)
       setSeats(snapshot)
       setLobbyCode(lobby.join_code)
+      setLobbyName(lobby.name)
       setActiveLobbyId(lobby.id)
       setActiveLobbyHostId(lobby.host_id)
       setTimer(lobby.settings?.turnTimer ?? 30)
@@ -197,6 +245,7 @@ function App() {
       const members = await joinLobby(lobby.id, session.user.id)
       setSeats(membersToSeats(members))
       setLobbyCode(lobby.join_code)
+      setLobbyName(lobby.name ?? '')
       setActiveLobbyId(lobby.id)
       setActiveLobbyHostId(lobby.host_id)
       setView('lobby')
@@ -217,13 +266,13 @@ function App() {
   if (isSupabaseConfigured && !session) return <AuthScreen />
 
   if (view === 'game' && activeGame) return <GameScreen game={activeGame} sessionId={activeGameSessionId} currentUserId={session?.user.id} isHost={session?.user.id === activeLobbyHostId} onRematch={async () => { if (!activeGameSessionId || !activeLobbyId) return; try { setActiveGame(await rematchSession(activeGameSessionId, activeLobbyId, activeGame)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to start the rematch.') } }} onCloseLobby={async () => { if (!activeLobbyId || !session?.user.id) return; try { await closeLobby(activeLobbyId, session.user.id); setView('home') } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to close the lobby.') } }} onNextHand={async () => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await dealNextHand(activeGameSessionId, activeGame)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to deal the next hand.') } }} onBid={async (amount) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitBid(activeGameSessionId, activeGame, session.user.id, amount)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to submit bid.') } }} onTrump={async (color) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitTrump(activeGameSessionId, activeGame, session.user.id, color)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to choose trump.') } }} onDiscard={async (cardIds) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitDiscard(activeGameSessionId, activeGame, session.user.id, cardIds)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to discard those cards.') } }} onCard={async (cardId) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitCard(activeGameSessionId, activeGame, session.user.id, cardId)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to play that card.') } }} onBack={() => setView('lobby')} />
-  if (view === 'lobby') return <Lobby code={lobbyCode} seats={displaySeats} timer={timer} setTimer={setTimer} winningScore={winningScore} setWinningScore={setWinningScore} onSettingsChange={async (nextScore) => { if (!activeLobbyId || !session?.user.id) return; try { setWinningScore((await updateLobbySettings(activeLobbyId, session.user.id, { turnTimer: timer, winningScore: nextScore })).winningScore) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to update the winning score.') } }} makeAi={makeAi} setDifficulty={setDifficulty} hostId={activeLobbyHostId} currentUserId={session?.user.id} onBack={() => setView('home')} onStart={startGame} filled={filled} />
+  if (view === 'lobby') return <Lobby code={lobbyCode} name={lobbyName || 'Crow Table'} onRename={async (nextName) => { if (!activeLobbyId || !session?.user.id) return; try { setLobbyName((await updateLobbyName(activeLobbyId, session.user.id, nextName)).name) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to rename the table.') } }} seats={displaySeats} timer={timer} setTimer={setTimer} winningScore={winningScore} setWinningScore={setWinningScore} onSettingsChange={async (nextScore) => { if (!activeLobbyId || !session?.user.id) return; try { setWinningScore((await updateLobbySettings(activeLobbyId, session.user.id, { turnTimer: timer, winningScore: nextScore })).winningScore) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to update the winning score.') } }} makeAi={makeAi} setDifficulty={setDifficulty} hostId={activeLobbyHostId} currentUserId={session?.user.id} onBack={() => setView('home')} onStart={startGame} filled={filled} />
 
   return <main className="app-shell">
     {toast && <div className="toast">{toast}</div>}
     <header className="topbar"><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className={`status-dot ${isSupabaseConfigured ? 'online' : ''}`} /> {isSupabaseConfigured ? 'Connected' : 'Demo mode'} <span className="profile-email">{session?.user.email ?? name}</span><button className="sign-out-button" onClick={signOut}>Sign out</button></div></header>
-    <section className="hero"><div className="hero-copy"><p className="eyebrow">A better seat at the table</p><h1>Bring your people.<br /><em>Deal the cards.</em></h1><p className="hero-text">A cozy place for family games, friendly rivalries, and one more hand before bed.</p><div className="hero-actions"><button className="button primary" onClick={startLobby}>Create a private table <span>→</span></button><label className="join-field"><span>Have a code?</span><input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())} placeholder="CROW-XXXX" /><button onClick={() => joinCode ? enterLobby() : showToast('Enter a table code first.')}>Join</button></label></div></div><div className="hero-art"><div className="sun" /><div className="card card-back"><div className="card-pattern">C</div></div><div className="card card-front"><span className="card-corner">14<br /><i>red</i></span><span className="card-number">14</span><span className="card-corner bottom">14<br /><i>red</i></span></div><span className="sparkle one">✦</span><span className="sparkle two">✦</span></div></section>
-    <section className="content-grid"><div className="panel welcome-panel"><div className="panel-heading"><div><p className="eyebrow">Your table</p><h2>Ready when you are</h2></div><span className="pill">New</span></div><div className="empty-table"><div className="mini-cards"><span>14</span><span>10</span><span>R</span></div><p>Create a private table and invite<br />your family with a simple code.</p><button className="text-button" onClick={startLobby}>Start a new table <span>→</span></button></div></div><div className="panel stats-panel"><div className="panel-heading"><div><p className="eyebrow">Your record</p><h2>At a glance</h2></div><button className="icon-button">↗</button></div><div className="stat-grid"><div><strong>{playerStats?.games_won ?? '—'}</strong><span>Games won</span></div><div><strong>{playerStats && playerStats.games_completed ? `${Math.round((playerStats.games_won / playerStats.games_completed) * 100)}%` : '—'}</strong><span>Win rate</span></div><div><strong>{playerStats?.hands_played ?? '—'}</strong><span>Hands played</span></div></div><p className="muted-note">Stats count completed player-only games.</p></div></section>
+    <section className="hero"><div className="hero-copy"><p className="eyebrow">A better seat at the table</p><h1>Bring your people.<br /><em>Deal the cards.</em></h1><p className="hero-text">A cozy place for family games, friendly rivalries, and one more hand before bed.</p><div className="hero-actions"><label className="join-field create-name-field"><span>Name your table</span><input value={lobbyName} onChange={(e) => setLobbyName(e.target.value)} placeholder="Or we’ll pick one for you" maxLength={40} /></label><button className="button primary" onClick={startLobby}>Create a private table <span>→</span></button><label className="join-field"><span>Have a code?</span><input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())} placeholder="CROW-XXXX" /><button onClick={() => joinCode ? enterLobby() : showToast('Enter a table code first.')}>Join</button></label></div></div><div className="hero-art"><div className="sun" /><div className="card card-back"><div className="card-pattern">C</div></div><div className="card card-front"><span className="card-corner">14<br /><i>red</i></span><span className="card-number">14</span><span className="card-corner bottom">14<br /><i>red</i></span></div><span className="sparkle one">✦</span><span className="sparkle two">✦</span></div></section>
+    <section className="content-grid"><div className="panel welcome-panel"><div className="panel-heading"><div><p className="eyebrow">Your tables</p><h2>{myLobbies.length ? 'Back to the game' : 'Ready when you are'}</h2></div><span className="pill">{myLobbies.length ? 'Live' : 'New'}</span></div>{myLobbies.length > 0 ? <div className="lobby-list">{myLobbies.map((lobby) => <div className="lobby-row" key={lobby.id}><div className="lobby-row-mark">C</div><div className="lobby-row-info"><strong>{lobby.name}</strong><span>{lobby.status === 'in_progress' ? 'Game in progress' : 'Waiting for players'} · {lobby.join_code}{lobby.host_id === session?.user?.id ? ' · Host' : ''}</span></div><div className="lobby-row-actions"><button className="lobby-rejoin" onClick={() => rejoinLobby(lobby)}>{lobby.status === 'in_progress' ? 'Resume' : 'Rejoin'} <span>→</span></button><button className="lobby-leave" onClick={() => leaveLobbyFor(lobby)}>Leave</button></div></div>)}</div> : <div className="empty-table"><div className="mini-cards"><span>14</span><span>10</span><span>R</span></div><p>Create a private table and invite<br />your family with a simple code.</p><button className="text-button" onClick={startLobby}>Start a new table <span>→</span></button></div>}</div><div className="panel stats-panel"><div className="panel-heading"><div><p className="eyebrow">Your record</p><h2>At a glance</h2></div><button className="icon-button">↗</button></div><div className="stat-grid"><div><strong>{playerStats?.games_won ?? '—'}</strong><span>Games won</span></div><div><strong>{playerStats && playerStats.games_completed ? `${Math.round((playerStats.games_won / playerStats.games_completed) * 100)}%` : '—'}</strong><span>Win rate</span></div><div><strong>{playerStats?.hands_played ?? '—'}</strong><span>Hands played</span></div></div><p className="muted-note">Stats count completed player-only games.</p></div></section>
     <footer><span>Rieman family table · Built for the long haul</span><span>Rieman Rules · 4 players</span></footer>
   </main>
 }
@@ -255,13 +304,15 @@ function LegacyLobby({ code, seats, timer, setTimer, makeAi, setDifficulty, onBa
   return <main className="app-shell lobby-shell"><header className="topbar"><button className="back-button" onClick={onBack}>← <span>Home</span></button><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className="status-dot" /> Private table</div></header><section className="lobby-header"><div><p className="eyebrow">Private table</p><h1>Gather your crows.</h1><p>Choose your seats, then start when everyone is ready.</p></div><div className="code-card"><span>JOIN CODE</span><strong>{code}</strong><button onClick={() => navigator.clipboard?.writeText(code)}>Copy code</button></div></section><section className="lobby-layout"><div className="panel seats-panel"><div className="panel-heading"><div><p className="eyebrow">The table</p><h2>{filled}/4 players ready</h2></div><span className="live-pill"><i /> Waiting</span></div><div className="seats-grid">{seats.map((seat) => <div className={`seat-card ${seat.status}`} key={seat.id}><div className="seat-top"><Avatar label={seat.name} color={seat.color} /><span className={`seat-badge team-${seat.team}`}>Team {seat.team}</span></div><strong>{seat.name}</strong>{seat.status === 'human' && seat.id === 'you' && <span className="seat-meta">That’s you · Host</span>}{seat.status === 'human' && seat.id !== 'you' && <span className="seat-meta">Connected</span>}{seat.status === 'open' && <><span className="seat-meta">Waiting for a player</span><button className="seat-action" onClick={() => makeAi(seat.id)}>Fill with AI +</button></>}{seat.status === 'ai' && <><span className="seat-meta">AI opponent</span><select value={seat.difficulty} onChange={(e) => setDifficulty(seat.id, e.target.value as Difficulty)}><option>Newbie</option><option>Average</option><option>Skilled</option></select></>}</div>)}</div><div className="team-note"><span>●</span><p>Teams are assigned by the host. Team A and Team B will alternate partner positions around the table.</p></div></div><aside className="panel settings-panel"><div className="panel-heading"><div><p className="eyebrow">Table settings</p><h2>Rieman Rules</h2></div><span className="rules-icon">R</span></div><div className="setting"><span>Ruleset</span><strong>Rieman Rules <small>500 points</small></strong></div><div className="setting"><span>Turn timer</span><div className="stepper"><button onClick={() => setTimer(Math.max(10, timer - 5))}>−</button><strong>{timer}s</strong><button onClick={() => setTimer(Math.min(120, timer + 5))}>+</button></div></div><div className="rule-summary"><strong>Quick rules</strong><p>Crow is always trump · 110 points per hand · Dealer takes 65 if all pass.</p></div><button className="button primary full" disabled={seats.some((s) => s.status === 'open')} onClick={onStart}>Start the game <span>→</span></button><p className="small-help">Everyone can rejoin if they disconnect. The host can’t remove players once the game begins.</p></aside></section></main>
 }
 
-function Lobby({ code, seats, timer, setTimer, winningScore, setWinningScore, onSettingsChange, makeAi, setDifficulty, hostId, currentUserId, onBack, onStart, filled }: { code: string; seats: (LobbySeat & { color: string })[]; timer: number; setTimer: (value: number) => void; winningScore: number; setWinningScore: (value: number) => void; onSettingsChange: (value: number) => void; makeAi: (id: string) => void; setDifficulty: (id: string, difficulty: Difficulty) => void; hostId: string | null; currentUserId?: string; onBack: () => void; onStart: () => void; filled: number }) {
+function Lobby({ code, name, onRename, seats, timer, setTimer, winningScore, setWinningScore, onSettingsChange, makeAi, setDifficulty, hostId, currentUserId, onBack, onStart, filled }: { code: string; name: string; onRename: (name: string) => void; seats: (LobbySeat & { color: string })[]; timer: number; setTimer: (value: number) => void; winningScore: number; setWinningScore: (value: number) => void; onSettingsChange: (value: number) => void; makeAi: (id: string) => void; setDifficulty: (id: string, difficulty: Difficulty) => void; hostId: string | null; currentUserId?: string; onBack: () => void; onStart: () => void; filled: number }) {
   const isHost = Boolean(hostId && currentUserId === hostId)
   const host = seats.find((seat) => seat.id === hostId)
   const canStart = isHost && !seats.some((seat) => seat.status === 'open')
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState(name)
   return <main className="app-shell lobby-shell">
     <header className="topbar"><button className="back-button" onClick={onBack}>← <span>Home</span></button><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className="status-dot" /> Private table</div></header>
-    <section className="lobby-header"><div><p className="eyebrow">Private table</p><h1>Gather your crows.</h1><p>Choose your seats, then start when everyone is ready.</p></div><div className="code-card"><span>JOIN CODE</span><strong>{code}</strong><button onClick={() => navigator.clipboard?.writeText(code)}>Copy code</button></div></section>
+    <section className="lobby-header"><div><p className="eyebrow">Private table</p><h1 className="lobby-title">{name}</h1>{isHost && (editingName ? <form className="rename-form" onSubmit={(e) => { e.preventDefault(); onRename(nameDraft); setEditingName(false) }}><input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} maxLength={40} autoFocus /><button className="text-button" type="submit">Save</button><button className="text-button" type="button" onClick={() => { setEditingName(false); setNameDraft(name) }}>Cancel</button></form> : <button className="text-button rename-button" onClick={() => { setNameDraft(name); setEditingName(true) }}>Rename table</button>)}<p className="lobby-sub">Gather your crows. Choose your seats, then start when everyone is ready.</p></div><div className="code-card"><span>JOIN CODE</span><strong>{code}</strong><button onClick={() => navigator.clipboard?.writeText(code)}>Copy code</button></div></section>
     <section className="lobby-layout"><div className="panel seats-panel"><div className="panel-heading"><div><p className="eyebrow">The table</p><h2>{filled}/4 players ready</h2><p className="host-line">Leader: <strong>{host?.name ?? 'Table host'}</strong>{isHost ? ' · You' : ''}</p></div><span className="live-pill"><i /> Waiting</span></div><div className="seats-grid">{seats.map((seat) => <div className={`seat-card ${seat.status}`} key={seat.id}><div className="seat-top"><Avatar label={seat.name} color={seat.color} /><span className={`seat-badge team-${seat.team}`}>Team {seat.team}</span></div><strong>{seat.name}</strong>{seat.id === hostId && <span className="host-badge">Table leader</span>}{seat.status === 'human' && seat.id !== hostId && <span className="seat-meta">Connected</span>}{seat.status === 'human' && seat.id === currentUserId && <span className="seat-meta">That’s you</span>}{seat.status === 'open' && <><span className="seat-meta">Waiting for a player</span>{isHost && <button className="seat-action" onClick={() => makeAi(seat.id)}>Fill with AI +</button>}</>}{seat.status === 'ai' && <><span className="seat-meta">AI opponent</span>{isHost ? <select value={seat.difficulty} onChange={(e) => setDifficulty(seat.id, e.target.value as Difficulty)}><option>Newbie</option><option>Average</option><option>Skilled</option></select> : <span className="seat-meta">Set by the leader</span>}</>}</div>)}</div><div className="team-note"><span>●</span><p>{isHost ? 'You are the table leader. AI seats and game start are under your control.' : `The table leader is ${host?.name ?? 'the host'}. They control AI seats and start the game.`}</p></div></div><aside className="panel settings-panel"><div className="panel-heading"><div><p className="eyebrow">Table settings</p><h2>Rieman Rules</h2></div><span className="rules-icon">R</span></div><div className="setting"><span>Ruleset</span><strong>Rieman Rules <small>500 points</small></strong></div><div className="setting"><span>Winning score</span><div className="stepper"><button disabled={!isHost} onClick={() => { const next = Math.max(250, winningScore - 50); setWinningScore(next); onSettingsChange(next) }}>−</button><strong>{winningScore}</strong><button disabled={!isHost} onClick={() => { const next = Math.min(1000, winningScore + 50); setWinningScore(next); onSettingsChange(next) }}>+</button></div></div><div className="setting"><span>Turn timer</span><div className="stepper"><button disabled={!isHost} onClick={() => setTimer(Math.max(10, timer - 5))}>−</button><strong>{timer}s</strong><button disabled={!isHost} onClick={() => setTimer(Math.min(120, timer + 5))}>+</button></div></div><div className="rule-summary"><strong>Quick rules</strong><p>Crow is always trump · 110 points per hand · Dealer takes 65 if all pass.</p></div><button className="button primary full" disabled={!canStart} onClick={onStart}>{isHost ? 'Start the game' : 'Waiting for the leader'} <span>→</span></button><p className="small-help">Everyone can rejoin if they disconnect. Only the table leader can change seats or start the game.</p></aside></section>
   </main>
 }
@@ -292,18 +343,15 @@ function GameScreen({ game, sessionId, currentUserId, isHost, onRematch, onClose
   const toggleDiscard = (card: Card) => { if (card.kind === 'crow' || (card.kind === 'number' && [5, 10, 14].includes(card.value))) return; setSelectedDiscard((selected) => selected.includes(card.id) ? selected.filter((id) => id !== card.id) : selected.length < 5 ? [...selected, card.id] : selected) }
   const phaseTitle = game.hand?.phase === 'bidding' ? 'Make your bid.' : game.hand?.phase === 'trump' ? 'Choose trump.' : game.hand?.phase === 'kitty' ? 'Discard the kitty.' : 'The hand is live.'
   return <main className="app-shell game-shell">
-    <TableHandPoints game={game} />
     <header className="topbar"><button className="back-button" onClick={onBack}>← <span>Lobby</span></button><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className="status-dot online" /> Live table</div></header>
-    <section className="game-header"><div><p className="eyebrow">Rieman Rules · Hand {game.handNumber + 1}</p><h1>{phaseTitle}</h1><p>{game.hand?.phase === 'bidding' ? (isMyTurn ? 'It’s your turn to bid' : `${currentPlayer?.name ?? 'A player'} is bidding`) : game.hand?.phase === 'trump' ? `${bidder?.name ?? 'The winning bidder'} won the bid` : game.hand?.phase === 'kitty' ? `${bidder?.name ?? 'The winning bidder'} is choosing the discard` : 'Clockwise play has begun'}</p></div><div className="scoreboard"><div><span>Team A</span><strong>{game.scores.A}</strong></div><div><span>Team B</span><strong>{game.scores.B}</strong></div></div></section>
-    {game.hand?.phase === 'bidding' && <div className="bid-banner bidding-banner"><strong>Current bid: {game.hand.currentBid ?? 'No bids yet'}</strong><span>{currentPlayer?.name ?? 'Player'} is up · bidding in progress</span></div>}
-    {game.hand?.bidderId && game.hand.phase !== 'bidding' && <div className={`bid-banner trump-banner ${game.hand.trumpColor ? `trump-${game.hand.trumpColor}` : ''}`}><strong>Team {bidder?.team} won the bid</strong><span>Bid: {game.hand.currentBid} · {game.hand.trumpColor ? `Trump: ${game.hand.trumpColor}` : 'Choosing trump'}</span></div>}
-    {game.hand?.phase === 'complete' && <div className={`result-banner ${game.hand.bidMade ? '' : 'failed-bid'}`}><strong>{game.hand.bidMade ? `Team ${game.hand.bidderTeam} made the bid` : `Team ${game.hand.bidderTeam} failed the bid`}</strong><span>Bid {game.hand.currentBid} · Captured {game.hand.teamPoints?.[game.hand.bidderTeam ?? 'A'] ?? 0} · Score {game.hand.scoreDelta?.[game.hand.bidderTeam ?? 'A'] ?? 0}</span></div>}
-    <section className="game-board"><div className={`table-center ${game.hand?.trumpColor ? `table-trump-${game.hand.trumpColor}` : ''}`}><p className="turn-label">{game.hand?.phase === 'bidding' ? 'Bidding' : 'Winning bid'}</p><strong>{game.hand?.phase === 'bidding' ? game.hand.currentBid ?? 'No bid' : `Team ${bidder?.team ?? '—'}`}</strong><small>{game.hand?.phase === 'bidding' ? `${currentPlayer?.name ?? 'Player'} is up` : `${game.hand?.currentBid ?? '—'} points · ${game.hand?.trumpColor ? `Trump: ${game.hand.trumpColor}` : 'Trump pending'}`}</small></div><KittyDisplay hand={game.hand} bidderIndex={visualPosition(game.players.findIndex((player) => player.id === bidder?.id))} />{showShuffle && <ShuffleAnimation />}<TableCards trick={tableTrick} players={game.players} visualPosition={visualPosition} />{game.players.map((player, index) => { const bid = latestBids.get(player.id); const position = visualPosition(index); return <div className={`player-position player-${position} ${player.id === currentUserId ? 'is-you' : ''}`} key={player.id}><Avatar label={player.name} color={avatarColors[index]} />{player.id === dealer?.id && <span className="dealer-chip">Dealer</span>}<span>{player.name}{player.id === currentUserId ? ' · You' : ''}</span><small>Team {player.team}{player.isAi ? ' · AI' : ''}</small>{game.hand?.phase === 'bidding' && <span className={`table-bid-status ${player.id === currentPlayer?.id ? 'bidding-now' : ''}`}>{player.id === currentPlayer?.id && 'Bidding'}{player.id !== currentPlayer?.id && bid && (bid.passed ? 'Passed' : `Bid ${bid.amount}`)}{player.id !== currentPlayer?.id && !bid && 'Not bid'}</span>}</div> })}</section>
+    <section className="game-header"><div><p className="eyebrow">Rieman Rules · Hand {game.handNumber + 1}</p><h1>{phaseTitle}</h1><p>{game.hand?.phase === 'bidding' ? (isMyTurn ? 'It’s your turn to bid' : `${currentPlayer?.name ?? 'A player'} is bidding`) : game.hand?.phase === 'trump' ? `${bidder?.name ?? 'The winning bidder'} won the bid` : game.hand?.phase === 'kitty' ? `${bidder?.name ?? 'The winning bidder'} is choosing the discard` : 'Play has begun'}</p></div><div className="scoreboard"><div><span>{teamLabel('A', game, currentUserId)}</span><strong>{game.scores.A}</strong></div><div><span>{teamLabel('B', game, currentUserId)}</span><strong>{game.scores.B}</strong></div></div></section>
+    {game.hand?.phase === 'complete' && <div className={`result-banner ${game.hand.bidMade ? '' : 'failed-bid'}`}><strong>{game.hand.bidMade ? `${teamLabel(game.hand.bidderTeam ?? 'A', game, currentUserId)} made the bid` : `${teamLabel(game.hand.bidderTeam ?? 'A', game, currentUserId)} failed the bid`}</strong><span>Bid {game.hand.currentBid} · Captured {game.hand.teamPoints?.[game.hand.bidderTeam ?? 'A'] ?? 0} · Score {game.hand.scoreDelta?.[game.hand.bidderTeam ?? 'A'] ?? 0}</span></div>}
+    <section className="game-board"><div className={`table-center ${game.hand?.trumpColor ? `table-trump-${game.hand.trumpColor}` : ''}`}><p className="turn-label">{game.hand?.phase === 'bidding' ? 'Bidding' : 'Winning bid'}</p><strong>{game.hand?.phase === 'bidding' ? game.hand.currentBid ?? 'No bid' : teamLabel(bidder?.team ?? 'A', game, currentUserId)}</strong><small>{game.hand?.phase === 'bidding' ? `${currentPlayer?.name ?? 'Player'} is up` : `${game.hand?.currentBid ?? '—'} points · ${game.hand?.trumpColor ? `Trump: ${game.hand.trumpColor}` : 'Trump pending'}`}</small>{game.hand?.bidderId && <div className="table-hand-points"><strong>{teamLabel('A', game, currentUserId)} {capturedPointsForTeam(game, 'A')}</strong><strong>{teamLabel('B', game, currentUserId)} {capturedPointsForTeam(game, 'B')}</strong></div>}</div>{showShuffle && <ShuffleAnimation />}<TableCards trick={tableTrick} players={game.players} visualPosition={visualPosition} />{game.players.map((player, index) => { const bid = latestBids.get(player.id); const position = visualPosition(index); return <div className={`player-position player-${position} ${player.id === currentUserId ? 'is-you' : ''}`} key={player.id}><Avatar label={player.name} color={avatarColors[index]} />{player.id === dealer?.id && <span className="dealer-chip">Dealer</span>}<span>{player.name}{player.id === currentUserId ? ' · You' : ''}</span><small>{teamLabel(player.team, game, currentUserId)}{player.isAi ? ' · AI' : ''}</small>{game.hand?.phase === 'bidding' && <span className={`table-bid-status ${player.id === currentPlayer?.id ? 'bidding-now' : ''}`}>{player.id === currentPlayer?.id && 'Bidding'}{player.id !== currentPlayer?.id && bid && (bid.passed ? 'Passed' : `Bid ${bid.amount}`)}{player.id !== currentPlayer?.id && !bid && 'Not bid'}</span>}</div> })}</section>
     {game.hand?.phase === 'trump' && <section className="action-panel"><p className="eyebrow">Trump selection</p><h2>{isBidder ? 'Which color will be trump?' : `${bidder?.name ?? 'The winning bidder'} is choosing trump`}</h2>{isBidder ? <div className="color-actions">{availableTrumpColors.map((color) => <button className={`color-choice color-${color}`} key={color} onClick={() => onTrump(color)}>{color}</button>)}</div> : <p className="muted-note">The winning bidder chooses a color they still hold.</p>}</section>}
     <section className="hand-panel"><div className="hand-heading"><div><p className="eyebrow">Your hand</p><h2>{me?.hand.length ?? 0} cards</h2></div>{game.hand?.phase === 'bidding' && <span className="bid-status">{isMyTurn ? 'Choose a bid' : `Waiting for ${currentPlayer?.name ?? 'player'}`}</span>}{game.hand?.phase === 'kitty' && isBidder && <span className="bid-status">{selectedDiscard.length}/5 selected</span>}{game.hand?.phase === 'playing' && <span className="bid-status">{isMyTurn ? 'Choose a legal card' : `Waiting for ${currentPlayer?.name ?? 'player'}`}</span>}</div><div className="hand-cards">{sortHand(me?.hand ?? []).map((card) => <CardView key={card.id} card={card} selected={selectedDiscard.includes(card.id)} onClick={game.hand?.phase === 'kitty' && isBidder ? () => toggleDiscard(card) : game.hand?.phase === 'playing' && isMyTurn && legalCardIds.has(card.id) ? () => onCard(card.id) : undefined} />)}</div>{game.hand?.phase === 'bidding' && <div className="bid-controls"><button className="pass-button" disabled={!isMyTurn} onClick={() => onBid(null)}>Pass</button><div className="bid-options">{bidOptions.map((bid) => <button key={bid} disabled={!isMyTurn} onClick={() => onBid(bid)}>{bid}</button>)}</div></div>}{game.hand?.phase === 'kitty' && isBidder && <button className="button primary discard-button" disabled={selectedDiscard.length !== 5} onClick={() => { onDiscard(selectedDiscard); setSelectedDiscard([]) }}>Discard selected cards →</button>}</section>
     {(game.hand?.phase === 'playing' || game.hand?.phase === 'complete') && <TrickPanel trick={lastTrick} players={game.players} completed />}
     {game.hand?.phase === 'complete' && game.status === 'completed' && <GameResult game={game} currentUserId={currentUserId} isHost={isHost} onRematch={onRematch} onCloseLobby={onCloseLobby} />}
-    {game.hand?.phase === 'complete' && game.status !== 'completed' && <section className="next-hand-panel"><div><p className="eyebrow">Hand complete</p><h2>Scores: Team A {game.scores.A} · Team B {game.scores.B}</h2></div>{canDealNextHand && <button className="button primary" onClick={onNextHand}>Deal next hand →</button>}{!canDealNextHand && <p className="muted-note">Waiting for {nextHandStarter?.name ?? 'the next dealer'} to deal the next hand.</p>}</section>}
+    {game.hand?.phase === 'complete' && game.status !== 'completed' && <section className="next-hand-panel"><div><p className="eyebrow">Hand complete</p><h2>Scores: {teamLabel('A', game, currentUserId)} {game.scores.A} · {teamLabel('B', game, currentUserId)} {game.scores.B}</h2></div>{canDealNextHand && <button className="button primary" onClick={onNextHand}>Deal next hand →</button>}{!canDealNextHand && <p className="muted-note">Waiting for {nextHandStarter?.name ?? 'the next dealer'} to deal the next hand.</p>}</section>}
     <div className="game-note"><span className="rules-icon">R</span><p>{sessionId ? 'Game state is saved and synchronized with everyone at the table.' : 'Connecting this table to the active session…'}</p></div>
   </main>
 }
@@ -316,23 +364,13 @@ function GameResult({ game, currentUserId, isHost, onRematch, onCloseLobby }: { 
   const myTeam = game.players.find((player) => player.id === currentUserId)?.team
   const won = myTeam === game.hand?.gameWinner
   const confetti = createConfetti()
-  return <section className={`game-result ${won ? 'game-won' : 'game-lost'}`}>{won && <div className="confetti" aria-hidden>{confetti.map((piece) => <i key={piece.id} style={{ left: piece.left, animationDelay: piece.delay, background: piece.color, transform: `rotate(${piece.rotation})` }} />)}</div>}<div className="result-icon">{won ? '★' : '○'}</div><p className="eyebrow">Game complete</p><h2>Team {game.hand?.gameWinner} wins</h2><p>{won ? 'You took the table. Nice work.' : 'The cards had other plans this time.'}</p>{isHost ? <div className="result-actions"><button className="button primary" onClick={onRematch}>Rematch →</button><button className="secondary-button" onClick={onCloseLobby}>Close lobby</button></div> : <p className="muted-note">Waiting for the table leader to choose a rematch or close the lobby.</p>}</section>
+  return <section className={`game-result ${won ? 'game-won' : 'game-lost'}`}>{won && <div className="confetti" aria-hidden>{confetti.map((piece) => <i key={piece.id} style={{ left: piece.left, animationDelay: piece.delay, background: piece.color, transform: `rotate(${piece.rotation})` }} />)}</div>}<div className="result-icon">{won ? '★' : '○'}</div><p className="eyebrow">Game complete</p><h2>{teamLabel(game.hand?.gameWinner ?? 'A', game, currentUserId)} wins</h2><p>{won ? 'You took the table. Nice work.' : 'The cards had other plans this time.'}</p>{isHost ? <div className="result-actions"><button className="button primary" onClick={onRematch}>Rematch →</button><button className="secondary-button" onClick={onCloseLobby}>Close lobby</button></div> : <p className="muted-note">Waiting for the table leader to choose a rematch or close the lobby.</p>}</section>
 }
 
-function TableCards({ trick, players, visualPosition, game, completed = Boolean(trick?.cards.length === 4) }: { trick?: { cards: Array<{ playerId: string; card: Card }>; winnerId?: string }; players: SessionState['players']; visualPosition: (index: number) => number; game?: SessionState; completed?: boolean }) {
-  if (!trick?.cards.length) return <>{game && <TableHandPoints game={game} />}<div className="table-empty">Cards played this trick will appear here.</div></>
+function TableCards({ trick, players, visualPosition, completed = Boolean(trick?.cards.length === 4) }: { trick?: { cards: Array<{ playerId: string; card: Card }>; winnerId?: string }; players: SessionState['players']; visualPosition: (index: number) => number; completed?: boolean }) {
+  if (!trick?.cards.length) return <div className="table-empty">Cards played this trick will appear here.</div>
   const winnerIndex = players.findIndex((player) => player.id === trick.cards.find((played) => played.playerId === trick.winnerId)?.playerId)
-  return <>{game && <TableHandPoints game={game} />}<div className={`table-cards ${completed ? 'trick-capture' : ''}`}><p className="table-label">Table · current trick</p>{trick.cards.map(({ playerId, card }) => { const playerIndex = visualPosition(players.findIndex((player) => player.id === playerId)); return <div className={`table-card-play table-card-position-${playerIndex} capture-target-${visualPosition(winnerIndex)}`} key={`${playerId}-${card.id}`}><CardView card={card} /></div> })}</div></>
-}
-
-function KittyDisplay({ hand, bidderIndex }: { hand?: SessionState['hand']; bidderIndex: number }) {
-  const cards = hand?.phase === 'bidding' ? Array.from({ length: 5 }) : hand?.kittyReveal ?? []
-  if (!cards.length) return null
-  return <div className={`kitty-display ${hand?.phase !== 'bidding' ? `kitty-flying kitty-target-${bidderIndex}` : ''}`} aria-label="Kitty"><span className="kitty-label">Kitty</span><div className="kitty-stack">{cards.map((_, index) => <div className="kitty-card" key={index}><span>●</span></div>)}</div></div>
-}
-
-function TableHandPoints({ game }: { game: SessionState }) {
-  return <div className="table-hand-points"><span>Hand points</span><strong>A {capturedPointsForTeam(game, 'A')}</strong><strong>B {capturedPointsForTeam(game, 'B')}</strong><small>/ 110</small></div>
+  return <div className={`table-cards ${completed ? 'trick-capture' : ''}`}>{trick.cards.map(({ playerId, card }) => { const playerIndex = visualPosition(players.findIndex((player) => player.id === playerId)); return <div className={`table-card-play table-card-position-${playerIndex} capture-target-${visualPosition(winnerIndex)}`} key={`${playerId}-${card.id}`}><CardView card={card} /></div> })}</div>
 }
 
 function ShuffleAnimation() { return null }

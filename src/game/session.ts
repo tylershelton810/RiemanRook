@@ -7,6 +7,21 @@ export function createSession(id: string, players: PlayerState[], dealerIndex = 
   return { id, status: 'active', players, scores: { A: 0, B: 0 }, handNumber: 0, winningScore, stats: Object.fromEntries(players.map((player) => [player.id, emptyPlayerStats()])), hand: startHand(players, dealerIndex) }
 }
 
+const AI_NAMES = ['Pip', 'Moss', 'Scout', 'Clover']
+
+export function fillMissingPlayersWithAi(session: SessionState, humanPlayerIds: Set<string>): SessionState {
+  const usedNames = new Set(session.players.filter((player) => player.isAi).map((player) => player.name))
+  let changed = false
+  const players = session.players.map((player) => {
+    if (player.isAi || humanPlayerIds.has(player.id)) return player
+    changed = true
+    const name = AI_NAMES.find((candidate) => !usedNames.has(candidate)) ?? `Crow AI ${usedNames.size + 1}`
+    usedNames.add(name)
+    return { ...player, isAi: true, connected: true, name }
+  })
+  return changed ? { ...session, players } : session
+}
+
 function emptyPlayerStats(): PlayerSessionStats { return { handsPlayed: 0, handsBid: 0, winningBids: 0, colors: {}, partners: {} } }
 
 export function startHand(players: PlayerState[], dealerIndex: number, random?: () => number): HandState {

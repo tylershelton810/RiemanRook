@@ -15,9 +15,30 @@ export interface LobbyRecord {
   id: string
   join_code: string
   host_id: string
+  name: string
   status: 'waiting' | 'in_progress' | 'finished'
   settings: { ruleset: string; turnTimer: number; winningScore?: number }
   members: LobbyMemberRow[]
+}
+
+export interface LobbySummary {
+  id: string
+  join_code: string
+  host_id: string
+  name: string
+  status: 'waiting' | 'in_progress' | 'finished'
+  settings: { ruleset?: string; turnTimer?: number; winningScore?: number }
+}
+
+const LOBBY_NAMES = [
+  'Midnight Rooks', 'Rowdy Crows', 'Hollow Oak', 'Silver Beak',
+  'Thistle Table', 'Moonlit Roost', 'Whistling Crows', 'Smoke & Feathers',
+  'Blue Ridge Rooks', 'Gilded Perch', 'Scrappy Crows', 'Long Meadow',
+  'Cinder Hill', 'Rook & Thorn', 'Dusty Wings', 'Copper Crest',
+]
+
+export function generateLobbyName() {
+  return LOBBY_NAMES[Math.floor(Math.random() * LOBBY_NAMES.length)]
 }
 
 function requireClient() {
@@ -37,7 +58,7 @@ export async function ensureProfile(userId: string, email?: string) {
   if (error) throw error
 }
 
-export async function createLobby(userId: string) {
+export async function createLobby(userId: string, name?: string) {
   const client = requireClient()
   const initialSeats: LobbySeat[] = [
     { id: userId, name: 'You', status: 'human', team: 'A' },
@@ -45,7 +66,7 @@ export async function createLobby(userId: string) {
     { id: 'seat-2', name: 'Open seat', status: 'open', team: 'A' },
     { id: 'seat-3', name: 'Open seat', status: 'open', team: 'B' },
   ]
-  const { data: lobby, error } = await client.from('lobbies').insert({ join_code: generateJoinCode(), host_id: userId, seats: initialSeats, settings: { ruleset: 'rieman-rules', turnTimer: 30, winningScore: 500 } }).select('id, join_code, host_id, status, settings').single()
+  const { data: lobby, error } = await client.from('lobbies').insert({ join_code: generateJoinCode(), host_id: userId, name: name?.trim() || generateLobbyName(), seats: initialSeats, settings: { ruleset: 'rieman-rules', turnTimer: 30, winningScore: 500 } }).select('id, join_code, host_id, name, status, settings').single()
   if (error) throw error
   const { error: memberError } = await client.from('lobby_players').insert({ lobby_id: lobby.id, user_id: userId, seat_index: 0, team: 'A', is_host: true })
   if (memberError) throw memberError
@@ -59,9 +80,18 @@ export async function updateLobbySettings(lobbyId: string, hostId: string, setti
   return data.settings as { turnTimer: number; winningScore: number }
 }
 
+export async function updateLobbyName(lobbyId: string, hostId: string, name: string) {
+  const client = requireClient()
+  const trimmed = name.trim()
+  if (!trimmed) throw new Error('Give the table a name first.')
+  const { data, error } = await client.from('lobbies').update({ name: trimmed }).eq('id', lobbyId).eq('host_id', hostId).select('name').single()
+  if (error) throw error
+  return data as { name: string }
+}
+
 export async function findLobbyByCode(code: string) {
   const client = requireClient()
-  const { data, error } = await client.from('lobbies').select('id, join_code, host_id, status, settings').eq('join_code', code.trim().toUpperCase()).eq('status', 'waiting').single()
+  const { data, error } = await client.from('lobbies').select('id, join_code, host_id, name, status, settings').eq('join_code', code.trim().toUpperCase()).eq('status', 'waiting').single()
   if (error) throw new Error('No waiting lobby was found with that code.')
   return data as Omit<LobbyRecord, 'members'>
 }
@@ -100,24 +130,52 @@ export async function getLobbySnapshot(lobbyId: string) {
   return seats
 }
 
-export async function recoverLatestLobby(userId: string) {
+export async function getMyLobbies(userId: string) {
   const client = requireClient()
   const { data: membership, error: membershipError } = await client
     .from('lobby_players')
-    .select('lobby_id, connected_at')
+    .select('lobby_id')
     .eq('user_id', userId)
     .order('connected_at', { ascending: false })
-    .limit(10)
   if (membershipError) throw membershipError
-  for (const row of membership ?? []) {
-    const { data: lobby, error } = await client.from('lobbies')
-      .select('id, join_code, host_id, status, settings')
-      .eq('id', row.lobby_id)
-      .in('status', ['waiting', 'in_progress'])
-      .maybeSingle()
-    if (!error && lobby) return lobby as { id: string; join_code: string; host_id: string; status: string; settings: { turnTimer?: number; winningScore?: number } }
-  }
-  return null
+  const lobbyIds = (membership ?? []).map((row) => row.lobby_id)
+  if (!lobbyIds.length) return []
+  const { data: lobbies, error } = await client.from('lobbies')
+    .select('id, join_code, host_id, name, status, settings, updated_at')
+    .in('id', lobbyIds)
+    .in('status', ['waiting', 'in_progress'])
+  if (error) throw error
+  return (lobbies ?? []).sort((left, right) => (Date.parse(right.updated_at ?? '') || 0) - (Date.parse(left.updated_at ?? '') || 0)) as LobbySummary[]
+}
+
+export async function leaveLobby(lobbyId: string, userId: string) {
+  const client = requireClient()
+  const { data: lobby } = await client.from('lobbies').select('host_id').eq('id', lobbyId).single()
+  const { error: leaveError } = await client.from('lobby_players').delete().eq('lobby_id', lobbyId).eq('user_id', userId)
+  if (leaveError) throw leaveError
+  if (!lobby || lobby.host_id !== userId) return
+  const members = await getLobbyMembers(lobbyId)
+  const nextHost = members[0]
+  if (!nextHost) return
+  const { error: clearError } = await client.from('lobby_players').update({ is_host: false }).eq('lobby_id', lobbyId)
+  if (clearError) throw clearError
+  const { error: promoteError } = await client.from('lobby_players').update({ is_host: true }).eq('lobby_id', lobbyId).eq('user_id', nextHost.user_id)
+  if (promoteError) throw promoteError
+  const { error: hostError } = await client.from('lobbies').update({ host_id: nextHost.user_id }).eq('id', lobbyId)
+  if (hostError) throw hostError
+}
+
+export async function syncAiSeatsFromPlayers(lobbyId: string, hostId: string, players: Array<{ id: string; name: string; team: string; isAi: boolean }>) {
+  const client = requireClient()
+  const members = await getLobbyMembers(lobbyId)
+  const seats = membersToSeats(members)
+  players.forEach((player, seatIndex) => {
+    if (player.isAi && seatIndex < seats.length) {
+      seats[seatIndex] = { id: player.id, name: player.name, status: 'ai', team: player.team as 'A' | 'B', difficulty: 'Average' }
+    }
+  })
+  const { error } = await client.from('lobbies').update({ seats }).eq('id', lobbyId).eq('host_id', hostId)
+  if (error) throw error
 }
 
 export async function addAiSeat(lobbyId: string, hostId: string, seatId: string) {

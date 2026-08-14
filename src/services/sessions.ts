@@ -1,8 +1,9 @@
-import { chooseTrump, createSession, discardKitty, playCard, recordBid, startNextHand } from '../game/session'
+import { chooseTrump, createSession, discardKitty, fillMissingPlayersWithAi, playCard, recordBid, startNextHand } from '../game/session'
 import type { CardColor } from '../game/types'
 import type { PlayerState, SessionState } from '../game/types'
 import { supabase } from '../lib/supabase'
 import type { LobbySeat } from '../lib/types'
+import { getLobbySnapshot, syncAiSeatsFromPlayers } from './lobbies'
 
 export async function startGameSession(lobbyId: string, hostId: string, seats: LobbySeat[], turnTimer: number, winningScore: number) {
   if (!supabase) throw new Error('Supabase is not configured.')
@@ -42,6 +43,20 @@ export async function getCurrentGameSession(lobbyId: string) {
   const { data, error } = await supabase.from('game_sessions').select('id, game_state, status').eq('lobby_id', lobbyId).in('status', ['active', 'completed']).order('created_at', { ascending: false }).limit(1).maybeSingle()
   if (error) throw error
   return data as { id: string; status: 'active' | 'completed'; game_state: SessionState & { turnTimer: number } } | null
+}
+
+export async function reconcileAiSeats(lobbyId: string, hostId: string): Promise<SessionState & { turnTimer: number } | null> {
+  if (!supabase) throw new Error('Supabase is not configured.')
+  const session = await getCurrentGameSession(lobbyId)
+  if (!session || session.status !== 'active') return null
+  const seats = await getLobbySnapshot(lobbyId)
+  const humanPlayerIds = new Set(seats.filter((seat) => seat.status === 'human').map((seat) => seat.id))
+  const nextState = fillMissingPlayersWithAi(session.game_state, humanPlayerIds)
+  if (nextState === session.game_state) return null
+  const { error } = await supabase.from('game_sessions').update({ game_state: nextState }).eq('id', session.id).eq('status', 'active')
+  if (error) throw error
+  await syncAiSeatsFromPlayers(lobbyId, hostId, nextState.players)
+  return nextState as SessionState & { turnTimer: number }
 }
 
 export async function submitBid(sessionId: string, state: SessionState, playerId: string, amount: number | null) {
