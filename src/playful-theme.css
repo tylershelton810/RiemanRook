@@ -356,8 +356,7 @@ footer { color: #91a09f; }
 .card-font-serif strong { font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif; }
 .card-font-fire { position: relative; background: linear-gradient(180deg, var(--fire-dark) 0%, var(--fire-mid) 42%, var(--fire-bright) 72%, var(--fire-light) 100%); background-size: 100% 170%; border-color: var(--fire-border); box-shadow: 0 3px 0 var(--fire-border); animation: fire-bg-flicker 1.6s ease-in-out infinite alternate; }
 @keyframes fire-bg-flicker { from { background-position: 0 0; } to { background-position: 0 22px; } }
-.card-font-fire strong { background: linear-gradient(180deg, #ffffff 0%, var(--fire-light) 38%, var(--fire-bright) 72%, var(--fire-dark) 100%); background-size: 100% 210%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent; animation: fire-text 1.8s ease-in-out infinite; filter: drop-shadow(0 0 3px var(--fire-glow)); }
-@keyframes fire-text { 0%, 100% { background-position: 0 0; } 50% { background-position: 0 22px; } }
+.card-font-fire strong { color: var(--fire-light); text-shadow: 0 1px 0 rgba(0, 0, 0, .35); }
 .card-font-fire small { color: var(--fire-light); }
 .card-font-fire::before { content: ''; position: absolute; left: 10%; right: 10%; top: 5%; bottom: 14%; background-image: radial-gradient(circle, var(--fire-ember) 0 1.5px, transparent 2px), radial-gradient(circle, var(--fire-mid) 0 1px, transparent 1.5px); background-size: 22px 30px, 26px 34px; background-position: 0 0, 11px 17px; -webkit-mask-image: linear-gradient(#000 0 60%, transparent 100%); mask-image: linear-gradient(#000 0 60%, transparent 100%); animation: fire-embers 1.5s linear infinite; pointer-events: none; }
 @keyframes fire-embers { to { background-position: 0 -30px, 11px -17px; } }
