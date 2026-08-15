@@ -52,10 +52,26 @@ function generateJoinCode() {
   return `CROW-${suffix}`
 }
 
-export async function ensureProfile(userId: string, email?: string) {
+export async function ensureProfile(userId: string, email?: string, displayName?: string) {
   const client = requireClient()
-  const { error } = await client.from('profiles').upsert({ id: userId, display_name: email?.split('@')[0] ?? 'Player' }, { onConflict: 'id' })
+  const { error } = await client.from('profiles').upsert({ id: userId, display_name: displayName?.trim() || email?.split('@')[0] || 'Player' }, { onConflict: 'id', ignoreDuplicates: true })
   if (error) throw error
+}
+
+export async function getDisplayName(userId: string): Promise<string> {
+  const client = requireClient()
+  const { data, error } = await client.from('profiles').select('display_name').eq('id', userId).maybeSingle()
+  if (error) throw error
+  return data?.display_name?.trim() ?? ''
+}
+
+export async function setDisplayName(userId: string, displayName: string): Promise<string> {
+  const client = requireClient()
+  const trimmed = displayName.trim().slice(0, 40)
+  if (!trimmed) throw new Error('Give yourself a name first.')
+  const { error } = await client.from('profiles').upsert({ id: userId, display_name: trimmed }, { onConflict: 'id' })
+  if (error) throw error
+  return trimmed
 }
 
 export async function createLobby(userId: string, name?: string) {

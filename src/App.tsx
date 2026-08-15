@@ -3,7 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import type { Difficulty, LobbySeat } from './lib/types'
-import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getLobbySnapshot, getLobbyMembers, getLobbyMemberFonts, getLobbyMemberLogos, getLobbyMemberPlacements, getMyLobbies, joinLobby, leaveLobby, membersToSeats, setAiSeatDifficulty, swapSeats as swapLobbySeats, updateLobbyName, updateLobbySettings } from './services/lobbies'
+import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getDisplayName, getLobbySnapshot, getLobbyMembers, getLobbyMemberFonts, getLobbyMemberLogos, getLobbyMemberPlacements, getMyLobbies, joinLobby, leaveLobby, membersToSeats, setAiSeatDifficulty, setDisplayName as saveDisplayName, swapSeats as swapLobbySeats, updateLobbyName, updateLobbySettings } from './services/lobbies'
 import type { LobbySummary } from './services/lobbies'
 import { getMyCrowLogo, getMyWallet, listCrowLogos, purchaseCrowLogo, setCrowLogo, crowLogoUrl } from './services/crowLogos'
 import type { CrowLogoRecord, CrowWallet } from './services/crowLogos'
@@ -35,16 +35,30 @@ function teamLabel(team: 'A' | 'B', game: SessionState, currentUserId?: string) 
   return myTeam === team ? 'Us' : 'Them'
 }
 
+type PlayerStatistics = {
+  games_won: number
+  games_lost: number
+  games_unfinished: number
+  games_completed: number
+  hands_played: number
+  hands_bid: number
+  winning_bids: number
+  favorite_colors: Record<string, number>
+  favorite_partners: Record<string, number>
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured)
-  const [playerStats, setPlayerStats] = useState<{ games_won: number; games_completed: number; hands_played: number } | null>(null)
+  const [playerStats, setPlayerStats] = useState<PlayerStatistics | null>(null)
+  const [showStats, setShowStats] = useState(false)
   const [view, setView] = useState<'home' | 'lobby' | 'game' | 'settings'>('home')
   const [activeGame, setActiveGame] = useState<SessionState | null>(null)
   const [activeGameSessionId, setActiveGameSessionId] = useState<string | null>(null)
   const plannedTrumpRef = useRef<CardColor | null>(null)
   const suppressGameAutoJoinRef = useRef(false)
   const [name] = useState('Tyler')
+  const [displayName, setDisplayName] = useState('')
   const [joinCode, setJoinCode] = useState('')
   const [lobbyCode, setLobbyCode] = useState('CROW-7K2P')
   const [lobbyName, setLobbyName] = useState('')
@@ -82,6 +96,12 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (view !== 'home') return
+    if (joinCode) setJoinCode('')
+    if (lobbyName) setLobbyName('')
+  }, [view])
+
+  useEffect(() => {
     if (!session?.user) return
     Object.values(loadLocalGames()).forEach((record) => {
       if (record.hostId !== session.user?.id) return
@@ -111,6 +131,13 @@ function App() {
     Object.values(loadLocalGames()).forEach((record) => { if (record.hostId === session?.user?.id) flushLocalGame(record) })
     const { error } = await supabase.auth.signOut()
     if (error) showToast(`Sign out failed: ${error.message}`)
+  }
+  const handleChangeDisplayName = async (nextName: string) => {
+    if (!session?.user) return
+    try {
+      setDisplayName(await saveDisplayName(session.user.id, nextName))
+      showToast('Display name updated.')
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to update your display name.') }
   }
   const makeAi = async (id: string) => {
     if (activeLobbyId && session?.user && session.user.id === activeLobbyHostId) {
@@ -184,8 +211,9 @@ function App() {
   }
 
   useEffect(() => {
-    if (!session?.user) return
+    if (!session?.user) { setDisplayName(''); return }
     ensureProfile(session.user.id, session.user.email).catch((error) => showToast(error.message))
+    getDisplayName(session.user.id).then(setDisplayName).catch(() => undefined)
   }, [session])
 
   useEffect(() => {
@@ -559,14 +587,15 @@ function App() {
 
   if (view === 'game' && activeGame) return <GameScreen game={activeGame} sessionId={activeGameSessionId} currentUserId={session?.user.id} isHost={session?.user.id === activeLobbyHostId} crowLogos={crowLogosByPlayer} catalog={crowLogoCatalog} cardAnimation={wallet?.cardAnimation ?? null} placements={placementsByPlayer} cardFonts={fontsByPlayer} onRematch={handleRematch} onCloseLobby={handleCloseLobby} onBid={handleBid} onTrump={handleTrump} onDiscard={handleDiscard} onCard={handleCard} onBack={handleGameBack} localMode={localGame} />
   if (view === 'lobby') return <Lobby code={lobbyCode} name={lobbyName || 'Crow Table'} onRename={async (nextName) => { if (!activeLobbyId || !session?.user.id) return; try { setLobbyName((await updateLobbyName(activeLobbyId, session.user.id, nextName)).name) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to rename the table.') } }} seats={displaySeats} timer={timer} setTimer={setTimer} winningScore={winningScore} setWinningScore={setWinningScore} onSettingsChange={async (nextScore) => { if (!activeLobbyId || !session?.user.id) return; try { setWinningScore((await updateLobbySettings(activeLobbyId, session.user.id, { turnTimer: timer, winningScore: nextScore })).winningScore) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to update the winning score.') } }} makeAi={makeAi} setDifficulty={setDifficulty} hostId={activeLobbyHostId} currentUserId={session?.user.id} onBack={() => setView('home')} onStart={startGame} filled={filled} onSwapSeats={swapSeats} />
-  if (view === 'settings') return <SettingsScreen currentLogo={myCrowLogo} catalog={crowLogoCatalog} tokens={wallet?.tokens ?? 0} purchasedLogos={wallet?.purchasedCrowLogos ?? []} currentAnimation={wallet?.cardAnimation ?? null} purchasedAnimations={wallet?.purchasedCardAnimations ?? []} currentPlacement={wallet?.placement ?? null} purchasedPlacements={wallet?.purchasedPlacements ?? []} currentFont={wallet?.cardFont ?? null} purchasedFonts={wallet?.purchasedCardFonts ?? []} onBack={() => setView('home')} onSelect={selectCrowLogo} onPurchase={buyCrowLogo} onSelectAnimation={selectCardAnimation} onPurchaseAnimation={buyCardAnimation} onSelectPlacement={selectPlacement} onPurchasePlacement={buyPlacement} onSelectFont={selectCardFont} onPurchaseFont={buyCardFont} />
+  if (view === 'settings') return <SettingsScreen currentLogo={myCrowLogo} catalog={crowLogoCatalog} tokens={wallet?.tokens ?? 0} purchasedLogos={wallet?.purchasedCrowLogos ?? []} currentAnimation={wallet?.cardAnimation ?? null} purchasedAnimations={wallet?.purchasedCardAnimations ?? []} currentPlacement={wallet?.placement ?? null} purchasedPlacements={wallet?.purchasedPlacements ?? []} currentFont={wallet?.cardFont ?? null} purchasedFonts={wallet?.purchasedCardFonts ?? []} onBack={() => setView('home')} onSelect={selectCrowLogo} onPurchase={buyCrowLogo} onSelectAnimation={selectCardAnimation} onPurchaseAnimation={buyCardAnimation} onSelectPlacement={selectPlacement} onPurchasePlacement={buyPlacement} onSelectFont={selectCardFont} onPurchaseFont={buyCardFont} displayName={displayName} onChangeDisplayName={handleChangeDisplayName} />
 
   return <main className="app-shell">
     {toast && <div className="toast">{toast}</div>}
-    <header className="topbar"><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className={`status-dot ${isSupabaseConfigured ? 'online' : ''}`} /> {isSupabaseConfigured ? 'Connected' : 'Demo mode'} <span className="profile-email">{session?.user.email ?? name}</span>{wallet && <span className="token-chip">◆ {wallet.tokens}</span>}<button className="settings-button" onClick={openSettings}>Shop</button><button className="sign-out-button" onClick={signOut}>Sign out</button></div></header>
+    <header className="topbar"><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className={`status-dot ${isSupabaseConfigured ? 'online' : ''}`} /> {isSupabaseConfigured ? 'Connected' : 'Demo mode'} <span className="profile-email">{displayName || (session?.user ? 'Player' : name)}</span>{wallet && <span className="token-chip">◆ {wallet.tokens}</span>}<button className="settings-button" onClick={openSettings}>Shop</button><button className="sign-out-button" onClick={signOut}>Sign out</button></div></header>
     <section className="hero"><div className="hero-copy"><p className="eyebrow">A better seat at the table</p><h1>Bring your people.<br /><em>Deal the cards.</em></h1><p className="hero-text">A cozy place for family games, friendly rivalries, and one more hand before bed.</p><div className="hero-actions"><label className="join-field create-name-field"><span>Name your table</span><input value={lobbyName} onChange={(e) => setLobbyName(e.target.value)} placeholder="Or we’ll pick one for you" maxLength={40} /></label><button className="button primary" onClick={startLobby}>Create a private table <span>→</span></button><label className="join-field"><span>Have a code?</span><input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())} placeholder="CROW-XXXX" /><button onClick={() => joinCode ? enterLobby() : showToast('Enter a table code first.')}>Join</button></label></div></div><div className="hero-art"><div className="sun" /><div className="card card-back"><div className="card-pattern">C</div></div><div className="card card-front"><span className="card-corner">14<br /><i>red</i></span><span className="card-number">14</span><span className="card-corner bottom">14<br /><i>red</i></span></div><span className="sparkle one">✦</span><span className="sparkle two">✦</span></div></section>
-    <section className="content-grid"><div className="panel welcome-panel"><div className="panel-heading"><div><p className="eyebrow">Your tables</p><h2>{myLobbies.length ? 'Back to the game' : 'Ready when you are'}</h2></div><span className="pill">{myLobbies.length ? 'Live' : 'New'}</span></div>{myLobbies.length > 0 ? <div className="lobby-list">{myLobbies.map((lobby) => <div className="lobby-row" key={lobby.id}><div className="lobby-row-mark">C</div><div className="lobby-row-info"><strong>{lobby.name}</strong><span>{lobby.status === 'in_progress' ? 'Game in progress' : 'Waiting for players'} · {lobby.join_code}{lobby.host_id === session?.user?.id ? ' · Host' : ''}</span></div><div className="lobby-row-actions"><button className="lobby-rejoin" onClick={() => rejoinLobby(lobby)}>{lobby.status === 'in_progress' ? 'Resume' : 'Rejoin'} <span>→</span></button><button className="lobby-leave" onClick={() => leaveLobbyFor(lobby)}>Leave</button></div></div>)}</div> : <div className="empty-table"><div className="mini-cards"><span>14</span><span>10</span><span>R</span></div><p>Create a private table and invite<br />your family with a simple code.</p><button className="text-button" onClick={startLobby}>Start a new table <span>→</span></button></div>}</div><div className="panel stats-panel"><div className="panel-heading"><div><p className="eyebrow">Your record</p><h2>At a glance</h2></div><button className="icon-button">↗</button></div><div className="stat-grid"><div><strong>{playerStats?.games_won ?? '—'}</strong><span>Games won</span></div><div><strong>{playerStats && playerStats.games_completed ? `${Math.round((playerStats.games_won / playerStats.games_completed) * 100)}%` : '—'}</strong><span>Win rate</span></div><div><strong>{playerStats?.hands_played ?? '—'}</strong><span>Hands played</span></div></div><p className="muted-note">Stats count completed player-only games.</p></div></section>
+    <section className="content-grid"><div className="panel welcome-panel"><div className="panel-heading"><div><p className="eyebrow">Your tables</p><h2>{myLobbies.length ? 'Back to the game' : 'Ready when you are'}</h2></div><span className="pill">{myLobbies.length ? 'Live' : 'New'}</span></div>{myLobbies.length > 0 ? <div className="lobby-list">{myLobbies.map((lobby) => <div className="lobby-row" key={lobby.id}><div className="lobby-row-mark">C</div><div className="lobby-row-info"><strong>{lobby.name}</strong><span>{lobby.status === 'in_progress' ? 'Game in progress' : 'Waiting for players'} · {lobby.join_code}{lobby.host_id === session?.user?.id ? ' · Host' : ''}</span></div><div className="lobby-row-actions"><button className="lobby-rejoin" onClick={() => rejoinLobby(lobby)}>{lobby.status === 'in_progress' ? 'Resume' : 'Rejoin'} <span>→</span></button><button className="lobby-leave" onClick={() => leaveLobbyFor(lobby)}>Leave</button></div></div>)}</div> : <div className="empty-table"><div className="mini-cards"><span>14</span><span>10</span><span>R</span></div><p>Create a private table and invite<br />your family with a simple code.</p><button className="text-button" onClick={startLobby}>Start a new table <span>→</span></button></div>}</div><div className="panel stats-panel"><div className="panel-heading"><div><p className="eyebrow">Your record</p><h2>At a glance</h2></div><button className="icon-button" onClick={() => setShowStats(true)} aria-label="Show all stats">↗</button></div><div className="stat-grid"><div><strong>{playerStats?.games_won ?? '—'}</strong><span>Games won</span></div><div><strong>{playerStats && playerStats.games_completed ? `${Math.round((playerStats.games_won / playerStats.games_completed) * 100)}%` : '—'}</strong><span>Win rate</span></div><div><strong>{playerStats?.hands_played ?? '—'}</strong><span>Hands played</span></div></div><p className="muted-note">Stats count completed player-only games.</p></div></section>
     <footer><span>Rieman family table · Built for the long haul</span><span>Rieman Rules · 4 players</span></footer>
+    {showStats && <StatsModal stats={playerStats} onClose={() => setShowStats(false)} />}
   </main>
 }
 
@@ -574,6 +603,7 @@ function AuthScreen() {
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [displayName, setDisplayName] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -584,13 +614,17 @@ function AuthScreen() {
     setMessage('')
     const result = mode === 'sign-in'
       ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password })
+      : await supabase.auth.signUp({ email, password, options: { data: { display_name: displayName.trim() } } })
     setBusy(false)
     if (result.error) setMessage(result.error.message)
-    else if (mode === 'sign-up') setMessage('Check your email to confirm your account, then come back to sign in.')
+    else if (mode === 'sign-up') {
+      const userId = result.data.user?.id
+      if (userId) ensureProfile(userId, email, displayName).catch(() => undefined)
+      setMessage('Check your email to confirm your account, then come back to sign in.')
+    }
   }
 
-  return <main className="auth-shell"><div className="auth-decoration"><span>10</span><span>14</span><span>C</span></div><section className="auth-card"><div className="brand auth-brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><p className="eyebrow">Your family table</p><h1>{mode === 'sign-in' ? 'Welcome back.' : 'Join the table.'}</h1><p className="auth-copy">{mode === 'sign-in' ? 'Sign in to find your tables and keep your stats.' : 'Create an account to play with family and keep your record.'}</p><form onSubmit={submit}><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'} /></label>{message && <p className="auth-message">{message}</p>}<button className="button primary full" disabled={busy}>{busy ? 'Working…' : mode === 'sign-in' ? 'Sign in →' : 'Create account →'}</button></form><button className="auth-switch" onClick={() => { setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in'); setMessage('') }}>{mode === 'sign-in' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}</button></section></main>
+  return <main className="auth-shell"><div className="auth-decoration"><span>10</span><span>14</span><span>C</span></div><section className="auth-card"><div className="brand auth-brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><p className="eyebrow">Your family table</p><h1>{mode === 'sign-in' ? 'Welcome back.' : 'Join the table.'}</h1><p className="auth-copy">{mode === 'sign-in' ? 'Sign in to find your tables and keep your stats.' : 'Create an account to play with family and keep your record.'}</p><form onSubmit={submit}><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" /></label>{mode === 'sign-up' && <label>Display name<input type="text" value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={40} placeholder="What should the table call you?" autoComplete="nickname" /></label>}<label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'} /></label>{message && <p className="auth-message">{message}</p>}<button className="button primary full" disabled={busy}>{busy ? 'Working…' : mode === 'sign-in' ? 'Sign in →' : 'Create account →'}</button></form><button className="auth-switch" onClick={() => { setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in'); setMessage('') }}>{mode === 'sign-in' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}</button></section></main>
 }
 
 function LegacyLobby({ code, seats, timer, setTimer, makeAi, setDifficulty, onBack, onStart, filled }: { code: string; seats: (LobbySeat & { color: string })[]; timer: number; setTimer: (value: number) => void; makeAi: (id: string) => void; setDifficulty: (id: string, difficulty: Difficulty) => void; onBack: () => void; onStart: () => void; filled: number }) {
@@ -642,14 +676,46 @@ function RulesModal({ name, onClose }: { name: string; onClose: () => void }) {
   </div></div>
 }
 
-function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentAnimation, purchasedAnimations, currentPlacement, purchasedPlacements, currentFont, purchasedFonts, onBack, onSelect, onPurchase, onSelectAnimation, onPurchaseAnimation, onSelectPlacement, onPurchasePlacement, onSelectFont, onPurchaseFont }: { currentLogo: string | null; catalog: CrowLogoRecord[]; tokens: number; purchasedLogos: string[]; currentAnimation: string | null; purchasedAnimations: string[]; currentPlacement: string | null; purchasedPlacements: string[]; currentFont: string | null; purchasedFonts: string[]; onBack: () => void; onSelect: (id: string) => void; onPurchase: (id: string) => void; onSelectAnimation: (id: string | null) => void; onPurchaseAnimation: (id: string) => void; onSelectPlacement: (id: string | null) => void; onPurchasePlacement: (id: string) => void; onSelectFont: (id: string | null) => void; onPurchaseFont: (id: string) => void }) {
+function StatsModal({ stats, onClose }: { stats: PlayerStatistics | null; onClose: () => void }) {
+  const winRate = stats && stats.games_completed ? Math.round((stats.games_won / stats.games_completed) * 100) : 0
+  const bidRate = stats && stats.hands_bid ? Math.round((stats.winning_bids / stats.hands_bid) * 100) : 0
+  const colors = Object.entries(stats?.favorite_colors ?? {}).sort((a, b) => b[1] - a[1])
+  const maxColor = colors.length ? Math.max(...colors.map(([, count]) => count)) : 0
+  const colorLabel: Record<string, string> = { black: 'Black', red: 'Red', yellow: 'Yellow', green: 'Green' }
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal-card rules-modal-card stats-modal-card" onClick={(event) => event.stopPropagation()}>
+    <div className="rules-modal-heading"><span className="rules-icon">S</span><div><p className="eyebrow">Your record</p><h3>All your stats</h3></div><button className="rules-modal-close" onClick={onClose} aria-label="Close stats">×</button></div>
+    {stats ? <><div className="stat-grid stats-grid">
+      <div><strong>{stats.games_won}</strong><span>Games won</span></div>
+      <div><strong>{stats.games_lost}</strong><span>Games lost</span></div>
+      <div><strong>{winRate}%</strong><span>Win rate</span></div>
+      <div><strong>{stats.games_completed}</strong><span>Games completed</span></div>
+      <div><strong>{stats.games_unfinished}</strong><span>Games unfinished</span></div>
+      <div><strong>{stats.hands_played}</strong><span>Hands played</span></div>
+      <div><strong>{stats.hands_bid}</strong><span>Hands bid</span></div>
+      <div><strong>{stats.winning_bids}</strong><span>Winning bids</span></div>
+      <div><strong>{bidRate}%</strong><span>Bid success</span></div>
+    </div>
+    {colors.length > 0 && <div className="favorites"><p className="eyebrow">Favorite trump</p>{colors.map(([color, count]) => <div className="favorite-row" key={color}><span>{colorLabel[color] ?? color}</span><div className="favorite-bar"><i className={`favorite-fill-${color}`} style={{ width: `${maxColor ? (count / maxColor) * 100 : 0}%` }} /></div><strong>{count}</strong></div>)}</div>}
+    <p className="muted-note">Stats count completed player-only games.</p></> : <p className="stats-empty">Play your first game to start your record.</p>}
+    <div className="modal-actions"><button className="button primary" onClick={onClose}>Done</button></div>
+  </div></div>
+}
+
+function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentAnimation, purchasedAnimations, currentPlacement, purchasedPlacements, currentFont, purchasedFonts, onBack, onSelect, onPurchase, onSelectAnimation, onPurchaseAnimation, onSelectPlacement, onPurchasePlacement, onSelectFont, onPurchaseFont, displayName, onChangeDisplayName }: { currentLogo: string | null; catalog: CrowLogoRecord[]; tokens: number; purchasedLogos: string[]; currentAnimation: string | null; purchasedAnimations: string[]; currentPlacement: string | null; purchasedPlacements: string[]; currentFont: string | null; purchasedFonts: string[]; onBack: () => void; onSelect: (id: string) => void; onPurchase: (id: string) => void; onSelectAnimation: (id: string | null) => void; onPurchaseAnimation: (id: string) => void; onSelectPlacement: (id: string | null) => void; onPurchasePlacement: (id: string) => void; onSelectFont: (id: string | null) => void; onPurchaseFont: (id: string) => void; displayName: string; onChangeDisplayName: (name: string) => void }) {
   const [confirm, setConfirm] = useState<{ title: string; description: string; priceLabel: string; canReplay: boolean; preview: ReactNode; onConfirm: () => void } | null>(null)
+  const [nameDraft, setNameDraft] = useState(displayName)
+  const [nameBusy, setNameBusy] = useState(false)
   const options = [...BUILTIN_CROW_LOGOS, ...catalog.map((record) => ({ id: record.id, name: record.name }))]
   const selected = currentLogo ?? 'classic'
   return <main className="app-shell settings-shell">
     <header className="topbar"><button className="back-button" onClick={onBack}>← <span>Home</span></button><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div></header>
     <section className="settings-header"><p className="eyebrow">The shop</p><h1>Spend your tokens.</h1><p className="settings-sub">Win games to earn tokens — even against AI — then spend them on crow faces, card frame animations, and typefaces. Your picks follow you to every table.</p><div className="token-balance">◆ {tokens} tokens</div></section>
     <section className="panel settings-panel-lg">
+      <div className="name-section">
+        <div className="shop-section-heading"><p className="eyebrow">Your name</p><h3>What the table calls you.</h3><p className="settings-sub">Shown in the top bar and on your seat at every table.</p></div>
+        <label className="join-field create-name-field"><span>Display name</span><input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} maxLength={40} placeholder="Give yourself a name" /></label>
+        <button className="button primary" disabled={nameBusy || nameDraft.trim() === displayName} onClick={() => { setNameBusy(true); onChangeDisplayName(nameDraft) }}>{nameBusy ? 'Saving…' : 'Save name'}</button>
+      </div>
       <div className="crow-preview-row"><div className={`logo-preview-stack ${currentPlacement ? `crow-placement-${currentPlacement}` : ''}`} key={currentPlacement ?? 'none'}><div className={`playing-card crow-card logo-preview ${currentAnimation ? `card-anim-${currentAnimation}` : ''}`}><CrowLogo logoId={selected} catalog={catalog} /><small>Crow</small></div></div><p className="settings-sub">Everything equipped at once — your crow face, frame animation, and the entrance it makes when you play it.</p></div>
       <div className="crow-logo-grid">{options.map((option) => { const paid = isPaidCrowLogo(option.id); const owned = !paid || purchasedLogos.includes(option.id); return <button key={option.id} className={`crow-logo-option ${selected === option.id ? 'selected' : ''}`} onClick={() => (owned ? onSelect(option.id) : setConfirm({ title: option.name, description: 'A custom crow face for your rook card.', priceLabel: `${TOKENS_PER_CROW_FACE} tokens`, canReplay: false, preview: <div className="playing-card crow-card logo-preview"><CrowLogo logoId={option.id} catalog={catalog} /><small>Crow</small></div>, onConfirm: () => onPurchase(option.id) }))}><span className="crow-card-thumb"><CrowLogo logoId={option.id} catalog={catalog} /></span><span className="crow-logo-name">{option.name}</span><span className={`crow-logo-price ${owned ? 'owned' : 'unowned'}`}>{owned ? (selected === option.id ? 'Equipped' : 'Owned') : `${TOKENS_PER_CROW_FACE} tokens`}</span></button> })}</div>
       <div className="shop-section">

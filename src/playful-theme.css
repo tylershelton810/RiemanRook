@@ -342,6 +342,8 @@ footer { color: #91a09f; }
 .crow-card .crow-logo-svg, .crow-card .crow-card-image { width: 30px; height: 30px; }
 .crow-card-image { object-fit: contain; }
 .shop-section { margin-top: 32px; padding-top: 26px; border-top: 1px solid var(--line); }
+.name-section { margin: 0 0 34px; padding: 0 0 28px; border-bottom: 1px solid var(--line); }
+.name-section .button { margin-top: 14px; }
 .shop-section-heading h3 { margin: 0 0 10px; font: 700 22px 'Fraunces', 'Playfair Display', serif; }
 .anim-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; margin-top: 18px; }
 .anim-grid button { display: grid; justify-items: center; gap: 8px; padding: 14px 8px 11px; border: 2px solid #dce7e3; border-radius: 12px; background: #fbfdfb; cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
@@ -432,6 +434,20 @@ footer { color: #91a09f; }
 .rules-modal-heading .eyebrow { margin: 0 0 2px; }
 .rules-modal-close { margin-left: auto; border: 0; background: none; color: var(--muted); font: 400 26px 'DM Sans'; line-height: 1; cursor: pointer; }
 .rules-modal-close:hover { color: var(--ink); }
+.stats-modal-card .stat-grid { margin: 20px 0 18px; }
+.stats-grid div { padding: 14px 10px 13px 0; }
+.stats-modal-card .eyebrow { margin: 0 0 6px; }
+.favorites { border-top: 1px solid #e1eae7; padding-top: 16px; }
+.favorite-row { display: grid; grid-template-columns: 76px 1fr 26px; align-items: center; gap: 12px; margin-top: 9px; }
+.favorite-row span { font: 11px 'DM Mono'; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.favorite-row strong { font: 700 12px 'DM Mono'; color: var(--green); text-align: right; }
+.favorite-bar { height: 7px; border-radius: 4px; background: #e9f1ee; overflow: hidden; }
+.favorite-bar i { display: block; height: 100%; border-radius: 4px; background: var(--green); }
+.favorite-bar .favorite-fill-black { background: #9eafb5; }
+.favorite-bar .favorite-fill-red { background: #e98a7a; }
+.favorite-bar .favorite-fill-yellow { background: #e0b95e; }
+.favorite-bar .favorite-fill-green { background: #8bbfae; }
+.stats-empty { padding: 30px 0 12px; text-align: center; color: var(--muted); font-size: 13px; }
 .rules-body { margin-top: 18px; }
 .rules-body h4 { margin: 16px 0 5px; color: var(--green); font: 700 12px 'DM Mono'; text-transform: uppercase; letter-spacing: .06em; }
 .rules-body h4:first-child { margin-top: 0; }
