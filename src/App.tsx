@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, FormEvent, ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import type { Difficulty, LobbySeat } from './lib/types'
 import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getLobbySnapshot, getLobbyMembers, getLobbyMemberFonts, getLobbyMemberLogos, getLobbyMemberPlacements, getMyLobbies, joinLobby, leaveLobby, membersToSeats, setSeatTeam as setLobbySeatTeam, swapSeats as swapLobbySeats, updateLobbyName, updateLobbySettings } from './services/lobbies'
 import type { LobbySummary } from './services/lobbies'
-import { getMyCrowLogo, getMyWallet, listCrowLogos, purchaseCrowLogo, setCrowLogo, uploadCrowLogo, crowLogoUrl } from './services/crowLogos'
+import { getMyCrowLogo, getMyWallet, listCrowLogos, purchaseCrowLogo, setCrowLogo, crowLogoUrl } from './services/crowLogos'
 import type { CrowLogoRecord, CrowWallet } from './services/crowLogos'
 import { purchaseCardAnimation, setCardAnimation } from './services/cardAnimations'
 import { purchasePlacement, setPlacement } from './services/placements'
@@ -313,16 +313,6 @@ function App() {
     } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to save that crow.') }
   }
 
-  const uploadCrowLogoFile = async (file: File) => {
-    if (!session?.user) throw new Error('Sign in to upload a crow.')
-    const record = await uploadCrowLogo(session.user.id, file)
-    setCrowLogoCatalog((current) => [...current, record])
-    await setCrowLogo(session.user.id, record.id)
-    setMyCrowLogo(record.id)
-    showToast('Crow logo added and selected.')
-    return record
-  }
-
   const buyCrowLogo = async (logoId: string) => {
     if (!session?.user) return showToast('Sign in to buy a crow face.')
     try {
@@ -396,7 +386,7 @@ function App() {
 
   if (view === 'game' && activeGame) return <GameScreen game={activeGame} sessionId={activeGameSessionId} currentUserId={session?.user.id} isHost={session?.user.id === activeLobbyHostId} crowLogos={crowLogosByPlayer} catalog={crowLogoCatalog} cardAnimation={wallet?.cardAnimation ?? null} placements={placementsByPlayer} cardFonts={fontsByPlayer} onRematch={async () => { if (!activeGameSessionId || !activeLobbyId) return; try { setActiveGame(await rematchSession(activeGameSessionId, activeLobbyId, activeGame)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to start the rematch.') } }} onCloseLobby={async () => { if (!activeLobbyId || !session?.user.id) return; try { await closeLobby(activeLobbyId, session.user.id); setView('home') } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to close the lobby.') } }} onBid={async (amount) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitBid(activeGameSessionId, activeGame, session.user.id, amount)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to submit bid.') } }} onTrump={async (color) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitTrump(activeGameSessionId, activeGame, session.user.id, color)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to choose trump.') } }} onDiscard={async (cardIds) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitDiscard(activeGameSessionId, activeGame, session.user.id, cardIds)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to discard those cards.') } }} onCard={async (cardId) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitCard(activeGameSessionId, activeGame, session.user.id, cardId)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to play that card.') } }} onBack={() => setView('lobby')} />
   if (view === 'lobby') return <Lobby code={lobbyCode} name={lobbyName || 'Crow Table'} onRename={async (nextName) => { if (!activeLobbyId || !session?.user.id) return; try { setLobbyName((await updateLobbyName(activeLobbyId, session.user.id, nextName)).name) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to rename the table.') } }} seats={displaySeats} timer={timer} setTimer={setTimer} winningScore={winningScore} setWinningScore={setWinningScore} onSettingsChange={async (nextScore) => { if (!activeLobbyId || !session?.user.id) return; try { setWinningScore((await updateLobbySettings(activeLobbyId, session.user.id, { turnTimer: timer, winningScore: nextScore })).winningScore) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to update the winning score.') } }} makeAi={makeAi} setDifficulty={setDifficulty} hostId={activeLobbyHostId} currentUserId={session?.user.id} onBack={() => setView('home')} onStart={startGame} filled={filled} onSwapSeats={swapSeats} onSetSeatTeam={setSeatTeam} />
-  if (view === 'settings') return <SettingsScreen currentLogo={myCrowLogo} catalog={crowLogoCatalog} tokens={wallet?.tokens ?? 0} purchasedLogos={wallet?.purchasedCrowLogos ?? []} currentAnimation={wallet?.cardAnimation ?? null} purchasedAnimations={wallet?.purchasedCardAnimations ?? []} currentPlacement={wallet?.placement ?? null} purchasedPlacements={wallet?.purchasedPlacements ?? []} currentFont={wallet?.cardFont ?? null} purchasedFonts={wallet?.purchasedCardFonts ?? []} onBack={() => setView('home')} onSelect={selectCrowLogo} onPurchase={buyCrowLogo} onSelectAnimation={selectCardAnimation} onPurchaseAnimation={buyCardAnimation} onSelectPlacement={selectPlacement} onPurchasePlacement={buyPlacement} onSelectFont={selectCardFont} onPurchaseFont={buyCardFont} onUpload={uploadCrowLogoFile} />
+  if (view === 'settings') return <SettingsScreen currentLogo={myCrowLogo} catalog={crowLogoCatalog} tokens={wallet?.tokens ?? 0} purchasedLogos={wallet?.purchasedCrowLogos ?? []} currentAnimation={wallet?.cardAnimation ?? null} purchasedAnimations={wallet?.purchasedCardAnimations ?? []} currentPlacement={wallet?.placement ?? null} purchasedPlacements={wallet?.purchasedPlacements ?? []} currentFont={wallet?.cardFont ?? null} purchasedFonts={wallet?.purchasedCardFonts ?? []} onBack={() => setView('home')} onSelect={selectCrowLogo} onPurchase={buyCrowLogo} onSelectAnimation={selectCardAnimation} onPurchaseAnimation={buyCardAnimation} onSelectPlacement={selectPlacement} onPurchasePlacement={buyPlacement} onSelectFont={selectCardFont} onPurchaseFont={buyCardFont} />
 
   return <main className="app-shell">
     {toast && <div className="toast">{toast}</div>}
@@ -454,28 +444,10 @@ function Lobby({ code, name, onRename, seats, timer, setTimer, winningScore, set
   </main>
 }
 
-function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentAnimation, purchasedAnimations, currentPlacement, purchasedPlacements, currentFont, purchasedFonts, onBack, onSelect, onPurchase, onSelectAnimation, onPurchaseAnimation, onSelectPlacement, onPurchasePlacement, onSelectFont, onPurchaseFont, onUpload }: { currentLogo: string | null; catalog: CrowLogoRecord[]; tokens: number; purchasedLogos: string[]; currentAnimation: string | null; purchasedAnimations: string[]; currentPlacement: string | null; purchasedPlacements: string[]; currentFont: string | null; purchasedFonts: string[]; onBack: () => void; onSelect: (id: string) => void; onPurchase: (id: string) => void; onSelectAnimation: (id: string | null) => void; onPurchaseAnimation: (id: string) => void; onSelectPlacement: (id: string | null) => void; onPurchasePlacement: (id: string) => void; onSelectFont: (id: string | null) => void; onPurchaseFont: (id: string) => void; onUpload: (file: File) => Promise<CrowLogoRecord> }) {
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState('')
+function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentAnimation, purchasedAnimations, currentPlacement, purchasedPlacements, currentFont, purchasedFonts, onBack, onSelect, onPurchase, onSelectAnimation, onPurchaseAnimation, onSelectPlacement, onPurchasePlacement, onSelectFont, onPurchaseFont }: { currentLogo: string | null; catalog: CrowLogoRecord[]; tokens: number; purchasedLogos: string[]; currentAnimation: string | null; purchasedAnimations: string[]; currentPlacement: string | null; purchasedPlacements: string[]; currentFont: string | null; purchasedFonts: string[]; onBack: () => void; onSelect: (id: string) => void; onPurchase: (id: string) => void; onSelectAnimation: (id: string | null) => void; onPurchaseAnimation: (id: string) => void; onSelectPlacement: (id: string | null) => void; onPurchasePlacement: (id: string) => void; onSelectFont: (id: string | null) => void; onPurchaseFont: (id: string) => void }) {
   const [confirm, setConfirm] = useState<{ title: string; description: string; priceLabel: string; canReplay: boolean; preview: ReactNode; onConfirm: () => void } | null>(null)
-  const fileInput = useRef<HTMLInputElement>(null)
   const options = [...BUILTIN_CROW_LOGOS, ...catalog.map((record) => ({ id: record.id, name: record.name }))]
   const selected = currentLogo ?? 'classic'
-  const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
-    setUploading(true)
-    setUploadError('')
-    try {
-      const record = await onUpload(file)
-      onSelect(record.id)
-    } catch (error) {
-      setUploadError(error instanceof Error ? error.message : 'Unable to upload that image.')
-    } finally {
-      setUploading(false)
-    }
-  }
   return <main className="app-shell settings-shell">
     <header className="topbar"><button className="back-button" onClick={onBack}>← <span>Home</span></button><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div></header>
     <section className="settings-header"><p className="eyebrow">The shop</p><h1>Spend your tokens.</h1><p className="settings-sub">Win games to earn tokens — even against AI — then spend them on crow faces, card frame animations, and typefaces. Your picks follow you to every table.</p><div className="token-balance">◆ {tokens} tokens</div></section>
@@ -503,7 +475,6 @@ function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentA
           {CARD_FONTS.map((font) => { const owned = purchasedFonts.includes(font.id); const equipped = currentFont === font.id; return <button key={font.id} className={`${equipped ? 'selected' : ''}`} onClick={() => (owned ? onSelectFont(font.id) : setConfirm({ title: font.name, description: font.description, priceLabel: `${COINS_PER_CARD_FONT} tokens`, canReplay: false, preview: <div className={`playing-card color-red card-font-${font.id} anim-preview`}><strong>14</strong><small>red</small></div>, onConfirm: () => onPurchaseFont(font.id) }))} title={font.description}><div className={`playing-card color-red card-font-${font.id} anim-preview`}><strong>14</strong><small>red</small></div><span className="crow-logo-name">{font.name}</span><span className={`crow-logo-price ${owned ? 'owned' : 'unowned'}`}>{owned ? (equipped ? 'Equipped' : 'Owned') : `${COINS_PER_CARD_FONT} tokens`}</span></button> })}
         </div>
       </div>
-      <div className="upload-row"><button className="secondary-button" onClick={() => fileInput.current?.click()} disabled={uploading}>{uploading ? 'Uploading…' : 'Upload your own'}</button><input ref={fileInput} type="file" accept="image/*" hidden onChange={handleFile} />{uploadError && <p className="upload-error">{uploadError}</p>}<p className="small-help">Uploads are free and live in the shared crow-logos bucket, so anyone at the table can pick them. Keep it under 2 MB.</p></div>
     </section>
     {confirm && <PurchaseModal key={confirm.title} confirm={confirm} onClose={() => setConfirm(null)} />}
   </main>

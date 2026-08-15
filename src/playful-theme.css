@@ -401,9 +401,6 @@ footer { color: #91a09f; }
 .placement-option:hover .crow-placement-flash { animation: crow-flash-card .5s ease-out; }
 .placement-option:hover .crow-placement-flash::after { animation: crow-flash-burst .5s ease-out; }
 .placement-option:hover .crow-placement-zoom { animation: crow-zoom-card .6s cubic-bezier(.2, .8, .3, 1); }
-.upload-row { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
-.upload-error { margin: 10px 0 0; color: var(--coral); font-size: 12px; }
-.upload-row .small-help { margin-top: 10px; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(15, 23, 42, .45); display: grid; place-items: center; padding: 20px; }
 .modal-card { background: #fbfdfb; border: 2px solid #dce7e3; border-radius: 16px; padding: 22px; width: min(320px, 100%); text-align: center; box-shadow: 0 18px 40px #16211e40; }
 .modal-preview { display: grid; place-items: center; padding: 16px 8px 20px; }
