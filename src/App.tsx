@@ -43,6 +43,7 @@ function App() {
   const [activeGame, setActiveGame] = useState<SessionState | null>(null)
   const [activeGameSessionId, setActiveGameSessionId] = useState<string | null>(null)
   const plannedTrumpRef = useRef<CardColor | null>(null)
+  const suppressGameAutoJoinRef = useRef(false)
   const [name] = useState('Tyler')
   const [joinCode, setJoinCode] = useState('')
   const [lobbyCode, setLobbyCode] = useState('CROW-7K2P')
@@ -133,6 +134,7 @@ function App() {
 
   const rejoinLobby = async (lobby: LobbySummary, shouldAbort: () => boolean = () => false) => {
     try {
+      suppressGameAutoJoinRef.current = false
       const pending = loadLocalGames()[lobby.id]
       if (pending && session?.user && pending.hostId === session.user.id) await flushLocalGame(pending)
       const recoveredSeats = await getLobbySnapshot(lobby.id)
@@ -217,7 +219,7 @@ function App() {
         getLobbyMemberPlacements(activeLobbyId).then(setPlacementsByPlayer).catch(() => undefined)
         getLobbyMemberFonts(activeLobbyId).then(setFontsByPlayer).catch(() => undefined)
         const started = await getCurrentGameSession(activeLobbyId)
-        if (started && !activeGame) {
+        if (started && !activeGame && !suppressGameAutoJoinRef.current) {
           setActiveGameSessionId(started.id)
           setActiveGame(started.game_state)
           setView('game')
@@ -227,7 +229,7 @@ function App() {
           if (reconciled) {
             setActiveGameSessionId(started.id)
             setActiveGame(reconciled)
-            setView('game')
+            if (!suppressGameAutoJoinRef.current) setView('game')
           }
         }
       } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to refresh the lobby.') }
@@ -239,7 +241,7 @@ function App() {
       refreshMembers()
       if (payload.new?.status === 'in_progress') {
         getCurrentGameSession(activeLobbyId).then((sessionState) => {
-          if (sessionState) { setActiveGameSessionId(sessionState.id); setActiveGame(sessionState.game_state); setView('game') }
+          if (sessionState && !suppressGameAutoJoinRef.current) { setActiveGameSessionId(sessionState.id); setActiveGame(sessionState.game_state); setView('game') }
         }).catch((error) => showToast(error.message))
       }
     }
@@ -248,7 +250,7 @@ function App() {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'lobbies', filter: `id=eq.${activeLobbyId}` }, onLobbyChange)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_sessions', filter: activeGameSessionId ? `id=eq.${activeGameSessionId}` : 'id=eq.none' }, (payload) => {
         setActiveGame(payload.new.game_state as SessionState)
-        setView('game')
+        if (!suppressGameAutoJoinRef.current) setView('game')
       })
       .subscribe()
     const refreshTimer = window.setInterval(refreshMembers, 1500)
@@ -332,6 +334,7 @@ function App() {
   const startLobby = async () => {
     if (!session?.user) return showToast('Sign in before creating a lobby.')
     try {
+      suppressGameAutoJoinRef.current = false
       setActiveLobbyId(null)
       setActiveLobbyHostId(null)
       setActiveGameSessionId(null)
@@ -353,6 +356,7 @@ function App() {
   const enterLobby = async () => {
     if (!session?.user) return showToast('Sign in before joining a lobby.')
     try {
+      suppressGameAutoJoinRef.current = false
       await ensureProfile(session.user.id, session.user.email)
       const lobby = await findLobbyByCode(joinCode)
       const members = await joinLobby(lobby.id, session.user.id)
@@ -366,6 +370,7 @@ function App() {
   }
 
   const startGame = async () => {
+    suppressGameAutoJoinRef.current = false
     if (!activeLobbyId || !activeLobbyHostId || !session?.user) return showToast('Only the table leader can start the game.')
     if (seats.some((seat) => seat.status === 'open')) return showToast('Fill every seat before starting.')
     if (seats.filter((seat) => seat.status === 'human').every((seat) => seat.id === session.user?.id)) {
@@ -539,6 +544,7 @@ function App() {
   }
 
   const handleGameBack = async () => {
+    suppressGameAutoJoinRef.current = true
     if (localGame && activeLobbyId && activeGame && activeGameSessionId && session?.user) {
       await flushLocalGame({ sessionId: activeGameSessionId, lobbyId: activeLobbyId, hostId: session.user.id, state: activeGame })
     }
