@@ -1,3 +1,5 @@
+import type { Difficulty } from '../lib/types'
+
 export const COLORS = ['black', 'red', 'yellow', 'green'] as const
 export type CardColor = typeof COLORS[number]
 export type Team = 'A' | 'B'
@@ -23,6 +25,7 @@ export interface PlayerState {
   hand: Card[]
   connected: boolean
   isAi: boolean
+  difficulty?: Difficulty
 }
 
 export interface BidState {

@@ -1,4 +1,4 @@
-import type { LobbySeat } from '../lib/types'
+import type { Difficulty, LobbySeat } from '../lib/types'
 import { supabase } from '../lib/supabase'
 
 export interface LobbyMemberRow {
@@ -269,6 +269,19 @@ export async function addAiSeat(lobbyId: string, hostId: string, seatId: string)
   const usedNames = new Set(seats.filter((seat) => seat.status === 'ai').map((seat) => seat.name))
   const aiName = aiNames.find((name) => !usedNames.has(name)) ?? `Crow AI ${usedNames.size + 1}`
   seats[seatIndex] = { ...seats[seatIndex], name: aiName, status: 'ai', difficulty: 'Average' }
+  const { error } = await client.from('lobbies').update({ seats }).eq('id', lobbyId).eq('host_id', hostId)
+  if (error) throw error
+  return seats
+}
+
+export async function setAiSeatDifficulty(lobbyId: string, hostId: string, seatId: string, difficulty: Difficulty) {
+  const client = requireClient()
+  const { data: lobby, error: readError } = await client.from('lobbies').select('seats').eq('id', lobbyId).eq('host_id', hostId).single()
+  if (readError) throw readError
+  const seats = [...((lobby.seats ?? []) as LobbySeat[])]
+  const seatIndex = seats.findIndex((seat) => seat.id === seatId)
+  if (seatIndex === -1) throw new Error('That seat is no longer available.')
+  seats[seatIndex] = { ...seats[seatIndex], difficulty }
   const { error } = await client.from('lobbies').update({ seats }).eq('id', lobbyId).eq('host_id', hostId)
   if (error) throw error
   return seats

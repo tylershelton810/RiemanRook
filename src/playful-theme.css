@@ -87,8 +87,6 @@ input, button, select { font-size: 16px; }
 .seat-action { color: var(--coral); }
 .seat-move { position: absolute; bottom: 17px; left: 17px; border: 0; background: none; color: var(--green); font: 600 11px 'DM Sans'; cursor: pointer; }
 .seat-move:hover { text-decoration: underline; }
-.team-toggle { margin-left: 6px; border: 0; background: transparent; cursor: pointer; font-size: 12px; line-height: 1; opacity: .8; }
-.team-toggle:hover { opacity: 1; }
 .seat-card.swapping { border-color: var(--coral); box-shadow: 0 0 0 3px #ec77652e; }
 .seat-card select { position: absolute; bottom: 17px; right: 17px; margin-top: 0; }
 .live-pill { border-radius: 9px; }
@@ -420,4 +418,20 @@ footer { color: #91a09f; }
 .replay-button:hover { background: #d9ede6; }
 .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
 .modal-actions button { flex: 1; }
+.ruleset-setting { align-items: flex-start; }
+.ruleset-value { display: flex; align-items: center; gap: 9px; }
+.ruleset-value strong { text-align: right; }
+.rules-info-button { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 24px; border: 1px solid #c4d2ce; border-radius: 50%; background: #f1f8f5; color: var(--green); font: 700 13px 'DM Mono'; cursor: pointer; }
+.rules-info-button:hover { background: #dff1ec; }
+.rules-modal-card { width: min(600px, 100%); max-height: 82vh; overflow-y: auto; text-align: left; }
+.rules-modal-heading { display: flex; align-items: center; gap: 12px; }
+.rules-modal-heading h3 { margin: 0; }
+.rules-modal-heading .eyebrow { margin: 0 0 2px; }
+.rules-modal-close { margin-left: auto; border: 0; background: none; color: var(--muted); font: 400 26px 'DM Sans'; line-height: 1; cursor: pointer; }
+.rules-modal-close:hover { color: var(--ink); }
+.rules-body { margin-top: 18px; }
+.rules-body h4 { margin: 16px 0 5px; color: var(--green); font: 700 12px 'DM Mono'; text-transform: uppercase; letter-spacing: .06em; }
+.rules-body h4:first-child { margin-top: 0; }
+.rules-body p { margin: 0 0 4px; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.rules-body strong { color: var(--ink); }
 @media (max-width: 700px) { .settings-header { padding: 30px 2px 18px; } .settings-panel-lg { padding: 18px 14px; } .crow-preview-row { align-items: flex-start; gap: 12px; } .logo-preview { width: 58px; height: 80px; } }

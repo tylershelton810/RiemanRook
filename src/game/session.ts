@@ -1,6 +1,7 @@
 import { createDeck, dealDeck, shuffleDeck } from './deck'
 import { canPlayCard, cardBeats, isLegalBid, leadColorForTrick, pointsInCards } from './rules'
 import type { Card, CardColor, HandState, PlayerSessionStats, PlayerState, SessionState, Team, Trick } from './types'
+import type { Difficulty } from '../lib/types'
 
 export function createSession(id: string, players: PlayerState[], dealerIndex = 0, winningScore = 500): SessionState {
   if (players.length !== 4) throw new Error('A Crow session requires four players.')
@@ -17,7 +18,7 @@ export function fillMissingPlayersWithAi(session: SessionState, humanPlayerIds: 
     changed = true
     const name = AI_NAMES.find((candidate) => !usedNames.has(candidate)) ?? `Crow AI ${usedNames.size + 1}`
     usedNames.add(name)
-    return { ...player, isAi: true, connected: true, name }
+    return { ...player, isAi: true, connected: true, name, difficulty: 'Average' as Difficulty }
   })
   return changed ? { ...session, players } : session
 }
@@ -160,6 +161,16 @@ export function startNextHand(session: SessionState): SessionState {
   session.handNumber += 1
   session.hand = startHand(session.players, dealerIndex)
   return session
+}
+
+export function resetSessionForRematch(session: SessionState): SessionState {
+  return {
+    ...session,
+    status: 'active',
+    scores: { A: 0, B: 0 },
+    handNumber: 0,
+    stats: Object.fromEntries(session.players.map((player) => [player.id, emptyPlayerStats()])),
+  }
 }
 
 function previousPlayerIndex(index: number, playerCount: number) {

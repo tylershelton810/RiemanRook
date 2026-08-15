@@ -1,4 +1,4 @@
-import { chooseTrump, createSession, discardKitty, fillMissingPlayersWithAi, playCard, recordBid, startNextHand } from '../game/session'
+import { chooseTrump, createSession, discardKitty, fillMissingPlayersWithAi, playCard, recordBid, resetSessionForRematch, startNextHand } from '../game/session'
 import type { CardColor } from '../game/types'
 import type { PlayerState, SessionState } from '../game/types'
 import { supabase } from '../lib/supabase'
@@ -16,6 +16,7 @@ export async function startGameSession(lobbyId: string, hostId: string, seats: L
     hand: [],
     connected: true,
     isAi: seat.status === 'ai',
+    difficulty: seat.difficulty,
   }))
   const sessionId = crypto.randomUUID()
   const gameState: SessionState = createSession(sessionId, players, 0, winningScore)
@@ -99,12 +100,34 @@ export async function dealNextHand(sessionId: string, state: SessionState) {
 
 export async function rematchSession(sessionId: string, lobbyId: string, state: SessionState) {
   if (!supabase) throw new Error('Supabase is not configured.')
-  const rematchState = { ...state, status: 'active' as const, scores: { A: 0, B: 0 }, handNumber: 0, stats: Object.fromEntries(state.players.map((player) => [player.id, { handsPlayed: 0, handsBid: 0, winningBids: 0, colors: {}, partners: {} }])) }
+  const rematchState = resetSessionForRematch(state)
   const { data, error } = await supabase.from('game_sessions').update({ status: 'active', game_state: rematchState, completed_at: null, statistics_applied: false, tokens_applied: false }).eq('id', sessionId).select('game_state').single()
   if (error) throw error
   const { error: lobbyError } = await supabase.from('lobbies').update({ status: 'in_progress' }).eq('id', lobbyId)
   if (lobbyError) throw lobbyError
   return data.game_state as SessionState
+}
+
+export async function persistLocalGame(lobbyId: string, hostId: string, state: SessionState) {
+  if (!supabase) throw new Error('Supabase is not configured.')
+  const completed = state.status === 'completed'
+  const { data, error } = await supabase.from('game_sessions').upsert({
+    id: state.id,
+    lobby_id: lobbyId,
+    ruleset_id: 'rieman-rules',
+    status: completed ? 'completed' : 'active',
+    game_state: state,
+    completed_at: completed ? new Date().toISOString() : null,
+  }, { onConflict: 'id' }).select('id').single()
+  if (error) throw error
+  const { error: lobbyError } = await supabase.from('lobbies').update({ status: completed ? 'finished' : 'in_progress' }).eq('id', lobbyId).eq('host_id', hostId)
+  if (lobbyError) throw lobbyError
+  if (completed) {
+    // Result state is already persisted; the RPCs are idempotent and safe to retry.
+    try { await supabase.rpc('finalize_session_statistics', { p_session_id: data.id }) } catch { /* best-effort */ }
+    try { await supabase.rpc('award_tokens_for_completed_game', { p_session_id: data.id }) } catch { /* best-effort */ }
+  }
+  return data.id
 }
 
 export async function closeLobby(lobbyId: string, hostId: string) {

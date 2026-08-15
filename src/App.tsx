@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import type { Difficulty, LobbySeat } from './lib/types'
-import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getLobbySnapshot, getLobbyMembers, getLobbyMemberFonts, getLobbyMemberLogos, getLobbyMemberPlacements, getMyLobbies, joinLobby, leaveLobby, membersToSeats, setSeatTeam as setLobbySeatTeam, swapSeats as swapLobbySeats, updateLobbyName, updateLobbySettings } from './services/lobbies'
+import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getLobbySnapshot, getLobbyMembers, getLobbyMemberFonts, getLobbyMemberLogos, getLobbyMemberPlacements, getMyLobbies, joinLobby, leaveLobby, membersToSeats, setAiSeatDifficulty, swapSeats as swapLobbySeats, updateLobbyName, updateLobbySettings } from './services/lobbies'
 import type { LobbySummary } from './services/lobbies'
 import { getMyCrowLogo, getMyWallet, listCrowLogos, purchaseCrowLogo, setCrowLogo, crowLogoUrl } from './services/crowLogos'
 import type { CrowLogoRecord, CrowWallet } from './services/crowLogos'
@@ -15,13 +15,13 @@ import { TOKENS_PER_CROW_FACE, isPaidCrowLogo, tokensForWinningScore } from './l
 import { CARD_ANIMATIONS, COINS_PER_CARD_ANIMATION } from './lib/cardAnimations'
 import { PLACEMENTS, COINS_PER_PLACEMENT } from './lib/placements'
 import { CARD_FONTS, COINS_PER_CARD_FONT } from './lib/cardFonts'
-import { closeLobby, dealNextHand, getActiveGameSession, getCurrentGameSession, getPlayerStatistics, reconcileAiSeats, rematchSession, startGameSession, submitBid, submitTrump, submitDiscard, submitCard } from './services/sessions'
+import { closeLobby, dealNextHand, getActiveGameSession, getCurrentGameSession, getPlayerStatistics, persistLocalGame, reconcileAiSeats, rematchSession, startGameSession, submitBid, submitTrump, submitDiscard, submitCard } from './services/sessions'
 import { createConfetti } from './game/celebration'
-import type { Card, SessionState } from './game/types'
+import type { Card, PlayerState, SessionState } from './game/types'
 import type { CardColor } from './game/types'
-import { buildHandKnowledge, chooseAiBid, chooseAiCardWithKnowledge, chooseAiDiscard, chooseAiTrump } from './game/ai'
+import { buildHandKnowledge, chooseAiBid, chooseAiCardWithKnowledge, chooseAiTrump, planKitty } from './game/ai'
 import { canPlayCard, leadColorForTrick } from './game/rules'
-import { capturedPointsForTeam } from './game/session'
+import { capturedPointsForTeam, chooseTrump, createSession, discardKitty, playCard, recordBid, resetSessionForRematch, startNextHand } from './game/session'
 
 const avatarColors = ['coral', 'gold', 'sage', 'lavender']
 
@@ -42,6 +42,7 @@ function App() {
   const [view, setView] = useState<'home' | 'lobby' | 'game' | 'settings'>('home')
   const [activeGame, setActiveGame] = useState<SessionState | null>(null)
   const [activeGameSessionId, setActiveGameSessionId] = useState<string | null>(null)
+  const plannedTrumpRef = useRef<CardColor | null>(null)
   const [name] = useState('Tyler')
   const [joinCode, setJoinCode] = useState('')
   const [lobbyCode, setLobbyCode] = useState('CROW-7K2P')
@@ -52,6 +53,7 @@ function App() {
   const [toast, setToast] = useState('')
   const [timer, setTimer] = useState(30)
   const [winningScore, setWinningScore] = useState(500)
+  const [localGame, setLocalGame] = useState(false)
   const [seats, setSeats] = useState<LobbySeat[]>([
     { id: 'you', name: 'You', status: 'human', team: 'A' },
     { id: 'seat-1', name: 'Open seat', status: 'open', team: 'B' },
@@ -77,12 +79,35 @@ function App() {
     })
     return () => listener.subscription.unsubscribe()
   }, [])
+
+  useEffect(() => {
+    if (!session?.user) return
+    Object.values(loadLocalGames()).forEach((record) => {
+      if (record.hostId !== session.user?.id) return
+      if (localGame && record.lobbyId === activeLobbyId) return
+      flushLocalGame(record)
+    })
+  }, [session])
   const filled = seats.filter((seat) => seat.status !== 'open').length
   const showToast = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2800) }
+  const LOCAL_GAMES_KEY = 'crow.localGames'
+  const loadLocalGames = (): Record<string, { sessionId: string; lobbyId: string; hostId: string; state: SessionState }> => {
+    try { return JSON.parse(localStorage.getItem(LOCAL_GAMES_KEY) ?? '{}') } catch { return {} }
+  }
+  const storeLocalGame = (lobbyId: string, record: { sessionId: string; lobbyId: string; hostId: string; state: SessionState }) => {
+    try { const all = loadLocalGames(); all[lobbyId] = record; localStorage.setItem(LOCAL_GAMES_KEY, JSON.stringify(all)) } catch { /* storage unavailable */ }
+  }
+  const dropLocalGame = (lobbyId: string) => {
+    try { const all = loadLocalGames(); delete all[lobbyId]; localStorage.setItem(LOCAL_GAMES_KEY, JSON.stringify(all)) } catch { /* storage unavailable */ }
+  }
+  const flushLocalGame = async (record: { sessionId: string; lobbyId: string; hostId: string; state: SessionState }) => {
+    try { await persistLocalGame(record.lobbyId, record.hostId, record.state); dropLocalGame(record.lobbyId); return true } catch { return false }
+  }
   const signOut = async () => {
     console.log('signing out')
     if (!supabase) return
     console.log('signing out supabase')
+    Object.values(loadLocalGames()).forEach((record) => { if (record.hostId === session?.user?.id) flushLocalGame(record) })
     const { error } = await supabase.auth.signOut()
     if (error) showToast(`Sign out failed: ${error.message}`)
   }
@@ -93,19 +118,23 @@ function App() {
     }
     if (!activeLobbyId) setSeats((current) => current.map((seat) => seat.id === id ? { ...seat, name: 'Crow AI', status: 'ai', difficulty: 'Average' } : seat))
   }
-  const setDifficulty = (id: string, difficulty: Difficulty) => setSeats((current) => current.map((seat) => seat.id === id ? { ...seat, difficulty } : seat))
+  const setDifficulty = async (id: string, difficulty: Difficulty) => {
+    if (activeLobbyId && session?.user && session.user.id === activeLobbyHostId) {
+      try { setSeats(await setAiSeatDifficulty(activeLobbyId, session.user.id, id, difficulty)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to update the AI difficulty.') }
+      return
+    }
+    setSeats((current) => current.map((seat) => seat.id === id ? { ...seat, difficulty } : seat))
+  }
   const swapSeats = async (firstId: string, secondId: string) => {
     if (!activeLobbyId || !session?.user || session.user.id !== activeLobbyHostId) return showToast('Only the table leader can move players.')
     try { setSeats(await swapLobbySeats(activeLobbyId, session.user.id, firstId, secondId)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to move that player.') }
-  }
-  const setSeatTeam = async (seatId: string, team: 'A' | 'B') => {
-    if (!activeLobbyId || !session?.user || session.user.id !== activeLobbyHostId) return showToast('Only the table leader can switch teams.')
-    try { setSeats(await setLobbySeatTeam(activeLobbyId, session.user.id, seatId, team)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to switch teams.') }
   }
   const displaySeats = useMemo(() => seats.map((seat, index) => ({ ...seat, color: avatarColors[index] })), [seats])
 
   const rejoinLobby = async (lobby: LobbySummary, shouldAbort: () => boolean = () => false) => {
     try {
+      const pending = loadLocalGames()[lobby.id]
+      if (pending && session?.user && pending.hostId === session.user.id) await flushLocalGame(pending)
       const recoveredSeats = await getLobbySnapshot(lobby.id)
       if (shouldAbort()) return
       setLobbyCode(lobby.join_code)
@@ -180,7 +209,7 @@ function App() {
 
   useEffect(() => {
     const client = supabase
-    if (!client || !activeLobbyId) return
+    if (!client || !activeLobbyId || localGame) return
     const refreshMembers = async () => {
       try {
         setSeats(await getLobbySnapshot(activeLobbyId))
@@ -224,7 +253,7 @@ function App() {
       .subscribe()
     const refreshTimer = window.setInterval(refreshMembers, 1500)
     return () => { window.clearInterval(refreshTimer); client.removeChannel(channel) }
-  }, [activeLobbyId, activeGameSessionId, activeGame, session, activeLobbyHostId])
+  }, [activeLobbyId, activeGameSessionId, activeGame, session, activeLobbyHostId, localGame])
 
   useEffect(() => {
     const hand = activeGame?.hand
@@ -232,25 +261,73 @@ function App() {
     const currentPlayer = activeGame.players[hand.currentPlayerIndex]
     if (!currentPlayer?.isAi) return
     const aiTimer = window.setTimeout(() => {
-      const action = hand.phase === 'bidding'
-        ? submitBid(activeGameSessionId, activeGame, currentPlayer.id, chooseAiBid(currentPlayer.hand, hand.currentBid, currentPlayer, activeGame.players, hand))
-        : hand.phase === 'trump'
-          ? submitTrump(activeGameSessionId, activeGame, currentPlayer.id, chooseAiTrump(currentPlayer.hand))
-          : hand.phase === 'kitty'
-            ? submitDiscard(activeGameSessionId, activeGame, currentPlayer.id, chooseAiDiscard(currentPlayer.hand))
-            : submitCard(activeGameSessionId, activeGame, currentPlayer.id, chooseAiCardWithKnowledge(currentPlayer.hand, buildHandKnowledge(hand.tricks[hand.tricks.length - 1]?.cards.length === 4 ? undefined : hand.tricks[hand.tricks.length - 1], hand.trumpColor, activeGame.players.find((player) => player.id === hand.bidderId), hand.tricks[hand.tricks.length - 1]?.cards.length === 4 ? hand.tricks : hand.tricks.slice(0, -1)), currentPlayer, activeGame.players.find((player) => player.id === hand.bidderId), activeGame.players).id)
-      action.then((nextState) => setActiveGame(nextState)).catch((error) => showToast(error instanceof Error ? error.message : 'Crow AI could not complete its turn.'))
+      const attempt = async () => {
+        let next: SessionState
+        if (localGame) {
+          const clone = structuredClone(activeGame)
+          if (hand.phase === 'bidding') {
+            next = recordBid(clone, currentPlayer.id, chooseAiBid(currentPlayer.hand, hand.currentBid, currentPlayer, activeGame.players, hand))
+          } else if (hand.phase === 'trump') {
+            const planned = plannedTrumpRef.current ?? chooseAiTrump(currentPlayer.hand)
+            plannedTrumpRef.current = null
+            next = chooseTrump(clone, currentPlayer.id, planned)
+          } else if (hand.phase === 'kitty') {
+            const plan = planKitty(currentPlayer.hand)
+            plannedTrumpRef.current = plan.trump
+            next = discardKitty(clone, currentPlayer.id, plan.discardIds)
+          } else {
+            next = playCard(clone, currentPlayer.id, chooseAiCardWithKnowledge(currentPlayer.hand, buildHandKnowledge(hand.tricks[hand.tricks.length - 1]?.cards.length === 4 ? undefined : hand.tricks[hand.tricks.length - 1], hand.trumpColor, activeGame.players.find((player) => player.id === hand.bidderId), hand.tricks[hand.tricks.length - 1]?.cards.length === 4 ? hand.tricks : hand.tricks.slice(0, -1)), currentPlayer, activeGame.players.find((player) => player.id === hand.bidderId), activeGame.players).id)
+          }
+          setActiveGame(next)
+          return
+        }
+        if (hand.phase === 'bidding') {
+          next = await submitBid(activeGameSessionId, activeGame, currentPlayer.id, chooseAiBid(currentPlayer.hand, hand.currentBid, currentPlayer, activeGame.players, hand))
+        } else if (hand.phase === 'trump') {
+          const planned = plannedTrumpRef.current ?? chooseAiTrump(currentPlayer.hand)
+          plannedTrumpRef.current = null
+          next = await submitTrump(activeGameSessionId, activeGame, currentPlayer.id, planned)
+        } else if (hand.phase === 'kitty') {
+          const plan = planKitty(currentPlayer.hand)
+          plannedTrumpRef.current = plan.trump
+          next = await submitDiscard(activeGameSessionId, activeGame, currentPlayer.id, plan.discardIds)
+        } else {
+          next = await submitCard(activeGameSessionId, activeGame, currentPlayer.id, chooseAiCardWithKnowledge(currentPlayer.hand, buildHandKnowledge(hand.tricks[hand.tricks.length - 1]?.cards.length === 4 ? undefined : hand.tricks[hand.tricks.length - 1], hand.trumpColor, activeGame.players.find((player) => player.id === hand.bidderId), hand.tricks[hand.tricks.length - 1]?.cards.length === 4 ? hand.tricks : hand.tricks.slice(0, -1)), currentPlayer, activeGame.players.find((player) => player.id === hand.bidderId), activeGame.players).id)
+        }
+        setActiveGame(next)
+      }
+      attempt().catch((error) => showToast(error instanceof Error ? error.message : 'Crow AI could not complete its turn.'))
     }, hand.phase === 'playing' && hand.tricks[hand.tricks.length - 1]?.cards.length === 4 && hand.tricks[hand.tricks.length - 1]?.visibleUntil ? Math.max(500, hand.tricks[hand.tricks.length - 1].visibleUntil! - Date.now()) : 500)
     return () => window.clearTimeout(aiTimer)
-  }, [activeGame, activeGameSessionId, activeLobbyHostId, session])
+  }, [activeGame, activeGameSessionId, activeLobbyHostId, session, localGame])
 
   useEffect(() => {
     if (!activeGame || !activeGameSessionId || activeGame.status === 'completed' || activeGame.hand?.phase !== 'complete' || !session?.user || session.user.id !== activeLobbyHostId) return
     const timer = window.setTimeout(() => {
+      if (localGame) { setActiveGame(startNextHand(structuredClone(activeGame))); return }
       dealNextHand(activeGameSessionId, activeGame).then((nextState) => setActiveGame(nextState)).catch((error) => showToast(error instanceof Error ? error.message : 'Unable to deal the next hand.'))
     }, 500)
     return () => window.clearTimeout(timer)
-  }, [activeGame, activeGameSessionId, activeLobbyHostId, session])
+  }, [activeGame, activeGameSessionId, activeLobbyHostId, session, localGame])
+
+  useEffect(() => {
+    if (!localGame || !activeGame || !activeLobbyId || !activeGameSessionId || !session?.user) return
+    storeLocalGame(activeLobbyId, { sessionId: activeGameSessionId, lobbyId: activeLobbyId, hostId: session.user.id, state: activeGame })
+  }, [localGame, activeGame, activeLobbyId, activeGameSessionId, session])
+
+  useEffect(() => {
+    if (!localGame || !activeGame || activeGame.status !== 'completed' || !activeLobbyId || !activeGameSessionId || !session?.user) return
+    const record = loadLocalGames()[activeLobbyId]
+    if (!record) return
+    flushLocalGame(record)
+  }, [localGame, activeGame?.status, activeLobbyId, activeGameSessionId, session])
+
+  useEffect(() => {
+    if (!localGame || !activeLobbyId) return
+    getLobbyMemberLogos(activeLobbyId).then(setCrowLogosByPlayer).catch(() => undefined)
+    getLobbyMemberPlacements(activeLobbyId).then(setPlacementsByPlayer).catch(() => undefined)
+    getLobbyMemberFonts(activeLobbyId).then(setFontsByPlayer).catch(() => undefined)
+  }, [localGame, activeLobbyId])
 
   const startLobby = async () => {
     if (!session?.user) return showToast('Sign in before creating a lobby.')
@@ -290,6 +367,19 @@ function App() {
 
   const startGame = async () => {
     if (!activeLobbyId || !activeLobbyHostId || !session?.user) return showToast('Only the table leader can start the game.')
+    if (seats.some((seat) => seat.status === 'open')) return showToast('Fill every seat before starting.')
+    if (seats.filter((seat) => seat.status === 'human').every((seat) => seat.id === session.user?.id)) {
+      const players: PlayerState[] = seats.map((seat) => ({ id: seat.id, name: seat.name, team: seat.team, hand: [], connected: true, isAi: seat.status === 'ai', difficulty: seat.difficulty }))
+      const sessionId = crypto.randomUUID()
+      const gameState: SessionState = createSession(sessionId, players, 0, winningScore)
+      setLocalGame(true)
+      setActiveGameSessionId(sessionId)
+      setActiveGame(gameState)
+      setView('game')
+      showToast('Playing against the crows locally — every move runs on this device.')
+      return
+    }
+    setLocalGame(false)
     try {
       const started = await startGameSession(activeLobbyId, session.user.id, seats, timer, winningScore)
       setActiveGameSessionId(started.id)
@@ -381,11 +471,88 @@ function App() {
     } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to save that typeface.') }
   }
 
+  const handleBid = async (amount: number | null) => {
+    if (!activeGameSessionId || !session?.user || !activeGame) return
+    const userId = session.user.id
+    if (localGame) {
+      try { setActiveGame(recordBid(structuredClone(activeGame), userId, amount)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to submit bid.') }
+      return
+    }
+    try { setActiveGame(await submitBid(activeGameSessionId, activeGame, userId, amount)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to submit bid.') }
+  }
+
+  const handleTrump = async (color: CardColor) => {
+    if (!activeGameSessionId || !session?.user || !activeGame) return
+    const userId = session.user.id
+    if (localGame) {
+      try { setActiveGame(chooseTrump(structuredClone(activeGame), userId, color)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to choose trump.') }
+      return
+    }
+    try { setActiveGame(await submitTrump(activeGameSessionId, activeGame, userId, color)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to choose trump.') }
+  }
+
+  const handleDiscard = async (cardIds: string[]) => {
+    if (!activeGameSessionId || !session?.user || !activeGame) return
+    const userId = session.user.id
+    if (localGame) {
+      try { setActiveGame(discardKitty(structuredClone(activeGame), userId, cardIds)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to discard those cards.') }
+      return
+    }
+    try { setActiveGame(await submitDiscard(activeGameSessionId, activeGame, userId, cardIds)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to discard those cards.') }
+  }
+
+  const handleCard = async (cardId: string) => {
+    if (!activeGameSessionId || !session?.user || !activeGame) return
+    const userId = session.user.id
+    if (localGame) {
+      try { setActiveGame(playCard(structuredClone(activeGame), userId, cardId)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to play that card.') }
+      return
+    }
+    try { setActiveGame(await submitCard(activeGameSessionId, activeGame, userId, cardId)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to play that card.') }
+  }
+
+  const handleRematch = async () => {
+    if (!activeLobbyId) return
+    if (localGame && activeGame) {
+      const rematchState = { ...resetSessionForRematch(activeGame), id: crypto.randomUUID() }
+      setActiveGameSessionId(rematchState.id)
+      setActiveGame(rematchState)
+      return
+    }
+    if (!activeGameSessionId || !activeGame) return
+    try { setActiveGame(await rematchSession(activeGameSessionId, activeLobbyId, activeGame)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to start the rematch.') }
+  }
+
+  const handleCloseLobby = async () => {
+    if (!activeLobbyId || !session?.user) return
+    const hostId = session.user.id
+    if (localGame && activeGame && activeGameSessionId) {
+      await flushLocalGame({ sessionId: activeGameSessionId, lobbyId: activeLobbyId, hostId, state: activeGame })
+    }
+    try {
+      await closeLobby(activeLobbyId, hostId)
+      setLocalGame(false)
+      setActiveGame(null)
+      setActiveGameSessionId(null)
+      setView('home')
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to close the lobby.') }
+  }
+
+  const handleGameBack = async () => {
+    if (localGame && activeLobbyId && activeGame && activeGameSessionId && session?.user) {
+      await flushLocalGame({ sessionId: activeGameSessionId, lobbyId: activeLobbyId, hostId: session.user.id, state: activeGame })
+    }
+    setLocalGame(false)
+    setActiveGame(null)
+    setActiveGameSessionId(null)
+    setView('lobby')
+  }
+
   if (authLoading) return <div className="auth-loading">Loading your table…</div>
   if (isSupabaseConfigured && !session) return <AuthScreen />
 
-  if (view === 'game' && activeGame) return <GameScreen game={activeGame} sessionId={activeGameSessionId} currentUserId={session?.user.id} isHost={session?.user.id === activeLobbyHostId} crowLogos={crowLogosByPlayer} catalog={crowLogoCatalog} cardAnimation={wallet?.cardAnimation ?? null} placements={placementsByPlayer} cardFonts={fontsByPlayer} onRematch={async () => { if (!activeGameSessionId || !activeLobbyId) return; try { setActiveGame(await rematchSession(activeGameSessionId, activeLobbyId, activeGame)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to start the rematch.') } }} onCloseLobby={async () => { if (!activeLobbyId || !session?.user.id) return; try { await closeLobby(activeLobbyId, session.user.id); setView('home') } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to close the lobby.') } }} onBid={async (amount) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitBid(activeGameSessionId, activeGame, session.user.id, amount)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to submit bid.') } }} onTrump={async (color) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitTrump(activeGameSessionId, activeGame, session.user.id, color)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to choose trump.') } }} onDiscard={async (cardIds) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitDiscard(activeGameSessionId, activeGame, session.user.id, cardIds)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to discard those cards.') } }} onCard={async (cardId) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitCard(activeGameSessionId, activeGame, session.user.id, cardId)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to play that card.') } }} onBack={() => setView('lobby')} />
-  if (view === 'lobby') return <Lobby code={lobbyCode} name={lobbyName || 'Crow Table'} onRename={async (nextName) => { if (!activeLobbyId || !session?.user.id) return; try { setLobbyName((await updateLobbyName(activeLobbyId, session.user.id, nextName)).name) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to rename the table.') } }} seats={displaySeats} timer={timer} setTimer={setTimer} winningScore={winningScore} setWinningScore={setWinningScore} onSettingsChange={async (nextScore) => { if (!activeLobbyId || !session?.user.id) return; try { setWinningScore((await updateLobbySettings(activeLobbyId, session.user.id, { turnTimer: timer, winningScore: nextScore })).winningScore) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to update the winning score.') } }} makeAi={makeAi} setDifficulty={setDifficulty} hostId={activeLobbyHostId} currentUserId={session?.user.id} onBack={() => setView('home')} onStart={startGame} filled={filled} onSwapSeats={swapSeats} onSetSeatTeam={setSeatTeam} />
+  if (view === 'game' && activeGame) return <GameScreen game={activeGame} sessionId={activeGameSessionId} currentUserId={session?.user.id} isHost={session?.user.id === activeLobbyHostId} crowLogos={crowLogosByPlayer} catalog={crowLogoCatalog} cardAnimation={wallet?.cardAnimation ?? null} placements={placementsByPlayer} cardFonts={fontsByPlayer} onRematch={handleRematch} onCloseLobby={handleCloseLobby} onBid={handleBid} onTrump={handleTrump} onDiscard={handleDiscard} onCard={handleCard} onBack={handleGameBack} localMode={localGame} />
+  if (view === 'lobby') return <Lobby code={lobbyCode} name={lobbyName || 'Crow Table'} onRename={async (nextName) => { if (!activeLobbyId || !session?.user.id) return; try { setLobbyName((await updateLobbyName(activeLobbyId, session.user.id, nextName)).name) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to rename the table.') } }} seats={displaySeats} timer={timer} setTimer={setTimer} winningScore={winningScore} setWinningScore={setWinningScore} onSettingsChange={async (nextScore) => { if (!activeLobbyId || !session?.user.id) return; try { setWinningScore((await updateLobbySettings(activeLobbyId, session.user.id, { turnTimer: timer, winningScore: nextScore })).winningScore) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to update the winning score.') } }} makeAi={makeAi} setDifficulty={setDifficulty} hostId={activeLobbyHostId} currentUserId={session?.user.id} onBack={() => setView('home')} onStart={startGame} filled={filled} onSwapSeats={swapSeats} />
   if (view === 'settings') return <SettingsScreen currentLogo={myCrowLogo} catalog={crowLogoCatalog} tokens={wallet?.tokens ?? 0} purchasedLogos={wallet?.purchasedCrowLogos ?? []} currentAnimation={wallet?.cardAnimation ?? null} purchasedAnimations={wallet?.purchasedCardAnimations ?? []} currentPlacement={wallet?.placement ?? null} purchasedPlacements={wallet?.purchasedPlacements ?? []} currentFont={wallet?.cardFont ?? null} purchasedFonts={wallet?.purchasedCardFonts ?? []} onBack={() => setView('home')} onSelect={selectCrowLogo} onPurchase={buyCrowLogo} onSelectAnimation={selectCardAnimation} onPurchaseAnimation={buyCardAnimation} onSelectPlacement={selectPlacement} onPurchasePlacement={buyPlacement} onSelectFont={selectCardFont} onPurchaseFont={buyCardFont} />
 
   return <main className="app-shell">
@@ -424,13 +591,14 @@ function LegacyLobby({ code, seats, timer, setTimer, makeAi, setDifficulty, onBa
   return <main className="app-shell lobby-shell"><header className="topbar"><button className="back-button" onClick={onBack}>← <span>Home</span></button><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className="status-dot" /> Private table</div></header><section className="lobby-header"><div><p className="eyebrow">Private table</p><h1>Gather your crows.</h1><p>Choose your seats, then start when everyone is ready.</p></div><div className="code-card"><span>JOIN CODE</span><strong>{code}</strong><button onClick={() => navigator.clipboard?.writeText(code)}>Copy code</button></div></section><section className="lobby-layout"><div className="panel seats-panel"><div className="panel-heading"><div><p className="eyebrow">The table</p><h2>{filled}/4 players ready</h2></div><span className="live-pill"><i /> Waiting</span></div><div className="seats-grid">{seats.map((seat) => <div className={`seat-card ${seat.status}`} key={seat.id}><div className="seat-top"><Avatar label={seat.name} color={seat.color} /><span className={`seat-badge team-${seat.team}`}>Team {seat.team}</span></div><strong>{seat.name}</strong>{seat.status === 'human' && seat.id === 'you' && <span className="seat-meta">That’s you · Host</span>}{seat.status === 'human' && seat.id !== 'you' && <span className="seat-meta">Connected</span>}{seat.status === 'open' && <><span className="seat-meta">Waiting for a player</span><button className="seat-action" onClick={() => makeAi(seat.id)}>Fill with AI +</button></>}{seat.status === 'ai' && <><span className="seat-meta">AI opponent</span><select value={seat.difficulty} onChange={(e) => setDifficulty(seat.id, e.target.value as Difficulty)}><option>Newbie</option><option>Average</option><option>Skilled</option></select></>}</div>)}</div><div className="team-note"><span>●</span><p>Teams are assigned by the host. Team A and Team B will alternate partner positions around the table.</p></div></div><aside className="panel settings-panel"><div className="panel-heading"><div><p className="eyebrow">Table settings</p><h2>Rieman Rules</h2></div><span className="rules-icon">R</span></div><div className="setting"><span>Ruleset</span><strong>Rieman Rules <small>500 points</small></strong></div><div className="setting"><span>Turn timer</span><div className="stepper"><button onClick={() => setTimer(Math.max(10, timer - 5))}>−</button><strong>{timer}s</strong><button onClick={() => setTimer(Math.min(120, timer + 5))}>+</button></div></div><div className="rule-summary"><strong>Quick rules</strong><p>Crow is always trump · 110 points per hand · Dealer takes 65 if all pass.</p></div><button className="button primary full" disabled={seats.some((s) => s.status === 'open')} onClick={onStart}>Start the game <span>→</span></button><p className="small-help">Everyone can rejoin if they disconnect. The host can’t remove players once the game begins.</p></aside></section></main>
 }
 
-function Lobby({ code, name, onRename, seats, timer, setTimer, winningScore, setWinningScore, onSettingsChange, makeAi, setDifficulty, hostId, currentUserId, onBack, onStart, filled, onSwapSeats, onSetSeatTeam }: { code: string; name: string; onRename: (name: string) => void; seats: (LobbySeat & { color: string })[]; timer: number; setTimer: (value: number) => void; winningScore: number; setWinningScore: (value: number) => void; onSettingsChange: (value: number) => void; makeAi: (id: string) => void; setDifficulty: (id: string, difficulty: Difficulty) => void; hostId: string | null; currentUserId?: string; onBack: () => void; onStart: () => void; filled: number; onSwapSeats: (firstId: string, secondId: string) => void; onSetSeatTeam: (seatId: string, team: 'A' | 'B') => void }) {
+function Lobby({ code, name, onRename, seats, timer, setTimer, winningScore, setWinningScore, onSettingsChange, makeAi, setDifficulty, hostId, currentUserId, onBack, onStart, filled, onSwapSeats }: { code: string; name: string; onRename: (name: string) => void; seats: (LobbySeat & { color: string })[]; timer: number; setTimer: (value: number) => void; winningScore: number; setWinningScore: (value: number) => void; onSettingsChange: (value: number) => void; makeAi: (id: string) => void; setDifficulty: (id: string, difficulty: Difficulty) => void; hostId: string | null; currentUserId?: string; onBack: () => void; onStart: () => void; filled: number; onSwapSeats: (firstId: string, secondId: string) => void }) {
   const isHost = Boolean(hostId && currentUserId === hostId)
   const host = seats.find((seat) => seat.id === hostId)
   const canStart = isHost && !seats.some((seat) => seat.status === 'open')
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(name)
   const [moveFrom, setMoveFrom] = useState<string | null>(null)
+  const [showRules, setShowRules] = useState(false)
   const handleSwapClick = (seatId: string) => {
     if (!moveFrom) { setMoveFrom(seatId); return }
     if (moveFrom === seatId) { setMoveFrom(null); return }
@@ -440,8 +608,32 @@ function Lobby({ code, name, onRename, seats, timer, setTimer, winningScore, set
   return <main className="app-shell lobby-shell">
     <header className="topbar"><button className="back-button" onClick={onBack}>← <span>Home</span></button><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className="status-dot" /> Private table</div></header>
     <section className="lobby-header"><div><p className="eyebrow">Private table</p><h1 className="lobby-title">{name}</h1>{isHost && (editingName ? <form className="rename-form" onSubmit={(e) => { e.preventDefault(); onRename(nameDraft); setEditingName(false) }}><input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} maxLength={40} autoFocus /><button className="text-button" type="submit">Save</button><button className="text-button" type="button" onClick={() => { setEditingName(false); setNameDraft(name) }}>Cancel</button></form> : <button className="text-button rename-button" onClick={() => { setNameDraft(name); setEditingName(true) }}>Rename table</button>)}<p className="lobby-sub">Gather your crows. Choose your seats, then start when everyone is ready.</p></div><div className="code-card"><span>JOIN CODE</span><strong>{code}</strong><button onClick={() => navigator.clipboard?.writeText(code)}>Copy code</button></div></section>
-    <section className="lobby-layout"><div className="panel seats-panel"><div className="panel-heading"><div><p className="eyebrow">The table</p><h2>{filled}/4 players ready</h2><p className="host-line">Leader: <strong>{host?.name ?? 'Table host'}</strong>{isHost ? ' · You' : ''}</p></div><span className="live-pill"><i /> Waiting</span></div><div className="seats-grid">{seats.map((seat) => <div className={`seat-card ${seat.status} ${moveFrom === seat.id ? 'swapping' : ''}`} key={seat.id}><div className="seat-top"><Avatar label={seat.name} color={seat.color} /><span className={`seat-badge team-${seat.team}`}>Team {seat.team}{isHost && seat.status !== 'open' && <button className="team-toggle" title={`Switch to team ${seat.team === 'A' ? 'B' : 'A'}`} onClick={() => onSetSeatTeam(seat.id, seat.team === 'A' ? 'B' : 'A')}>⇄</button>}</span></div><strong>{seat.name}</strong>{seat.id === hostId && <span className="host-badge">Table leader</span>}{seat.status === 'human' && seat.id !== hostId && <span className="seat-meta">Connected</span>}{seat.status === 'open' && <><span className="seat-meta">Waiting for a player</span>{isHost && <button className="seat-action" onClick={() => makeAi(seat.id)}>Fill with AI +</button>}</>}{seat.status === 'ai' && <><span className="seat-meta">AI opponent</span>{isHost ? <select value={seat.difficulty} onChange={(e) => setDifficulty(seat.id, e.target.value as Difficulty)}><option>Newbie</option><option>Average</option><option>Skilled</option></select> : <span className="seat-meta">Set by the leader</span>}</>}{isHost && <button className="seat-move" onClick={() => handleSwapClick(seat.id)}>{moveFrom === seat.id ? 'Cancel' : moveFrom ? `Swap with ${seats.find((candidate) => candidate.id === moveFrom)?.name ?? 'player'}` : 'Move'}</button>}</div>)}</div><div className="team-note"><span>●</span><p>{isHost ? (moveFrom ? 'Now choose a seat to swap with, or press Cancel on the picked-up seat.' : 'You are the table leader. Move swaps two players and each takes their new seat’s team; ⇄ switches a team by hand.') : `The table leader is ${host?.name ?? 'the host'}. They arrange seats, teams, and AI before starting.`}</p></div></div><aside className="panel settings-panel"><div className="panel-heading"><div><p className="eyebrow">Table settings</p><h2>Rieman Rules</h2></div><span className="rules-icon">R</span></div><div className="setting"><span>Ruleset</span><strong>Rieman Rules <small>500 points</small></strong></div><div className="setting"><span>Winning score</span><div className="stepper"><button disabled={!isHost} onClick={() => { const next = Math.max(250, winningScore - 50); setWinningScore(next); onSettingsChange(next) }}>−</button><strong>{winningScore}</strong><button disabled={!isHost} onClick={() => { const next = Math.min(1000, winningScore + 50); setWinningScore(next); onSettingsChange(next) }}>+</button></div></div><div className="setting"><span>Turn timer</span><div className="stepper"><button disabled={!isHost} onClick={() => setTimer(Math.max(10, timer - 5))}>−</button><strong>{timer}s</strong><button disabled={!isHost} onClick={() => setTimer(Math.min(120, timer + 5))}>+</button></div></div><div className="rule-summary"><strong>Quick rules</strong><p>Crow is always trump · 110 points per hand · Dealer takes 65 if all pass.</p></div><button className="button primary full" disabled={!canStart} onClick={onStart}>{isHost ? 'Start the game' : 'Waiting for the leader'} <span>→</span></button><p className="small-help">Everyone can rejoin if they disconnect. Only the table leader can change seats or start the game.</p></aside></section>
+    <section className="lobby-layout"><div className="panel seats-panel"><div className="panel-heading"><div><p className="eyebrow">The table</p><h2>{filled}/4 players ready</h2><p className="host-line">Leader: <strong>{host?.name ?? 'Table host'}</strong>{isHost ? ' · You' : ''}</p></div><span className="live-pill"><i /> Waiting</span></div><div className="seats-grid">{seats.map((seat) => <div className={`seat-card ${seat.status} ${moveFrom === seat.id ? 'swapping' : ''}`} key={seat.id}><div className="seat-top"><Avatar label={seat.name} color={seat.color} /><span className={`seat-badge team-${seat.team}`}>Team {seat.team}</span></div><strong>{seat.name}</strong>{seat.id === hostId && <span className="host-badge">Table leader</span>}{seat.status === 'human' && seat.id !== hostId && <span className="seat-meta">Connected</span>}{seat.status === 'open' && <><span className="seat-meta">Waiting for a player</span>{isHost && <button className="seat-action" onClick={() => makeAi(seat.id)}>Fill with AI +</button>}</>}{seat.status === 'ai' && <><span className="seat-meta">AI opponent</span>{isHost ? <select value={seat.difficulty} onChange={(e) => setDifficulty(seat.id, e.target.value as Difficulty)}><option>Newbie</option><option>Average</option><option>Skilled</option></select> : <span className="seat-meta">Set by the leader</span>}</>}{isHost && <button className="seat-move" onClick={() => handleSwapClick(seat.id)}>{moveFrom === seat.id ? 'Cancel' : moveFrom ? `Swap with ${seats.find((candidate) => candidate.id === moveFrom)?.name ?? 'player'}` : 'Move'}</button>}</div>)}</div><div className="team-note"><span>●</span><p>{isHost ? (moveFrom ? 'Now choose a seat to swap with, or press Cancel on the picked-up seat.' : 'You are the table leader. Move swaps two players, and each takes their new seat’s team.') : `The table leader is ${host?.name ?? 'the host'}. They arrange seats, teams, and AI before starting.`}</p></div></div><aside className="panel settings-panel"><div className="panel-heading"><div><p className="eyebrow">Table settings</p><h2>Rieman Rules</h2></div><span className="rules-icon">R</span></div><div className="setting ruleset-setting"><span>Ruleset</span><div className="ruleset-value"><strong>Rieman Rules <small>500 points</small></strong><button className="rules-info-button" onClick={() => setShowRules(true)} aria-label="How to play Rieman Rules">?</button></div></div><div className="setting"><span>Winning score</span><div className="stepper"><button disabled={!isHost} onClick={() => { const next = Math.max(250, winningScore - 50); setWinningScore(next); onSettingsChange(next) }}>−</button><strong>{winningScore}</strong><button disabled={!isHost} onClick={() => { const next = Math.min(1000, winningScore + 50); setWinningScore(next); onSettingsChange(next) }}>+</button></div></div><div className="setting"><span>Turn timer</span><div className="stepper"><button disabled={!isHost} onClick={() => setTimer(Math.max(10, timer - 5))}>−</button><strong>{timer}s</strong><button disabled={!isHost} onClick={() => setTimer(Math.min(120, timer + 5))}>+</button></div></div><div className="rule-summary"><strong>Quick rules</strong><p>Crow is always trump · 110 points per hand · Dealer takes 65 if all pass.</p></div><button className="button primary full" disabled={!canStart} onClick={onStart}>{isHost ? 'Start the game' : 'Waiting for the leader'} <span>→</span></button><p className="small-help">Everyone can rejoin if they disconnect. Only the table leader can change seats or start the game.</p></aside></section>
+    {showRules && <RulesModal name="Rieman Rules" onClose={() => setShowRules(false)} />}
   </main>
+}
+
+function RulesModal({ name, onClose }: { name: string; onClose: () => void }) {
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal-card rules-modal-card" onClick={(event) => event.stopPropagation()}>
+    <div className="rules-modal-heading"><span className="rules-icon">R</span><div><p className="eyebrow">How to play</p><h3>{name}</h3></div><button className="rules-modal-close" onClick={onClose} aria-label="Close rules">×</button></div>
+    <div className="rules-body">
+      <h4>The deck</h4>
+      <p>57 cards in four colors — black, red, yellow, green — numbered 1 through 14, plus one <strong>Crow</strong>. The Crow is always trump.</p>
+      <h4>Teams &amp; the table</h4>
+      <p>Four players split into two teams of two. Partners sit across from each other and count points together.</p>
+      <h4>The deal</h4>
+      <p>Each player receives 13 cards. The last 5 go face-down to a kitty in the middle of the table.</p>
+      <h4>Bidding</h4>
+      <p>The player left of the dealer starts the bidding. Bids run from 65 to 110 in steps of 5 — raise the bid or pass. The highest bidder wins the kitty; if everyone passes, the dealer is forced to take the bid at 65.</p>
+      <h4>Kitty &amp; trump</h4>
+      <p>The winning bidder picks up the kitty, then discards any five cards back down. Point cards — the Crow, 5s, 10s, and 14s — may never be discarded. Then they name one of the four colors as trump for the hand.</p>
+      <h4>Playing a hand</h4>
+      <p>The player left of the dealer leads any card, and everyone must follow that color if they can. The highest card of the led color wins the trick; trump beats plain colors, and the Crow beats everything. The winner of each trick leads the next until all 13 tricks are done.</p>
+      <h4>Scoring</h4>
+      <p>Captured cards earn points: the Crow is worth 10, 5s are worth 5, and 10s and 14s are worth 10 — 110 points in every hand. The bidding team must take at least what they bid, or that amount is subtracted from their score; the other team keeps every point they capture. First team to 500 wins the game.</p>
+    </div>
+    <div className="modal-actions"><button className="button primary" onClick={onClose}>Got it</button></div>
+  </div></div>
 }
 
 function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentAnimation, purchasedAnimations, currentPlacement, purchasedPlacements, currentFont, purchasedFonts, onBack, onSelect, onPurchase, onSelectAnimation, onPurchaseAnimation, onSelectPlacement, onPurchasePlacement, onSelectFont, onPurchaseFont }: { currentLogo: string | null; catalog: CrowLogoRecord[]; tokens: number; purchasedLogos: string[]; currentAnimation: string | null; purchasedAnimations: string[]; currentPlacement: string | null; purchasedPlacements: string[]; currentFont: string | null; purchasedFonts: string[]; onBack: () => void; onSelect: (id: string) => void; onPurchase: (id: string) => void; onSelectAnimation: (id: string | null) => void; onPurchaseAnimation: (id: string) => void; onSelectPlacement: (id: string | null) => void; onPurchasePlacement: (id: string) => void; onSelectFont: (id: string | null) => void; onPurchaseFont: (id: string) => void }) {
@@ -485,7 +677,7 @@ function PurchaseModal({ confirm, onClose }: { confirm: { title: string; descrip
   return <div className="modal-backdrop" onClick={onClose}><div className="modal-card" onClick={(event) => event.stopPropagation()}><div className="modal-preview" key={replayTick}>{confirm.preview}</div><h3>Buy {confirm.title}?</h3><p>{confirm.description}</p><p className="modal-price">Costs {confirm.priceLabel}</p>{confirm.canReplay && <button className="replay-button" onClick={() => setReplayTick((tick) => tick + 1)}>Play again</button>}<div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="button primary" onClick={() => { confirm.onConfirm(); onClose() }}>Buy for {confirm.priceLabel}</button></div></div></div>
 }
 
-function GameScreen({ game, sessionId, currentUserId, isHost, crowLogos, catalog, cardAnimation, placements, cardFonts, onRematch, onCloseLobby, onBid, onTrump, onDiscard, onCard, onBack }: { game: SessionState; sessionId: string | null; currentUserId?: string; isHost: boolean; crowLogos: Record<string, string | null>; catalog: CrowLogoRecord[]; cardAnimation: string | null; placements: Record<string, string | null>; cardFonts: Record<string, string | null>; onRematch: () => void; onCloseLobby: () => void; onBid: (amount: number | null) => void; onTrump: (color: CardColor) => void; onDiscard: (cardIds: string[]) => void; onCard: (cardId: string) => void; onBack: () => void }) {
+function GameScreen({ game, sessionId, currentUserId, isHost, crowLogos, catalog, cardAnimation, placements, cardFonts, onRematch, onCloseLobby, onBid, onTrump, onDiscard, onCard, onBack, localMode = false }: { game: SessionState; sessionId: string | null; currentUserId?: string; isHost: boolean; crowLogos: Record<string, string | null>; catalog: CrowLogoRecord[]; cardAnimation: string | null; placements: Record<string, string | null>; cardFonts: Record<string, string | null>; onRematch: () => void; onCloseLobby: () => void; onBid: (amount: number | null) => void; onTrump: (color: CardColor) => void; onDiscard: (cardIds: string[]) => void; onCard: (cardId: string) => void; onBack: () => void; localMode?: boolean }) {
   const [selectedDiscard, setSelectedDiscard] = useState<string[]>([])
   const showShuffle = false
   const currentPlayer = game.players[game.hand?.currentPlayerIndex ?? 0]
@@ -520,13 +712,13 @@ function GameScreen({ game, sessionId, currentUserId, isHost, crowLogos, catalog
   const gameOver = game.hand?.phase === 'complete' && game.status === 'completed'
   const phaseTitle = gameOver ? 'The table is done.' : game.hand?.phase === 'bidding' ? 'Make your bid.' : game.hand?.phase === 'trump' ? 'Choose trump.' : game.hand?.phase === 'kitty' ? 'Discard the kitty.' : 'The hand is live.'
   return <main className="app-shell game-shell">
-    <header className="topbar"><button className="back-button" onClick={onBack}>← <span>Lobby</span></button><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className="status-dot online" /> Live table</div></header>
+    <header className="topbar"><button className="back-button" onClick={onBack}>← <span>Lobby</span></button><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className={`status-dot ${localMode ? '' : 'online'}`} /> {localMode ? 'Local game' : 'Live table'}</div></header>
     <section className="game-header"><div><p className="eyebrow">Rieman Rules · Hand {game.handNumber + 1}</p><h1>{phaseTitle}</h1></div><div className="scoreboard"><div><span>{teamLabel('A', game, currentUserId)}</span><strong>{game.scores.A}</strong></div><div><span>{teamLabel('B', game, currentUserId)}</span><strong>{game.scores.B}</strong></div></div></section>
     {gameOver && <GameResult game={game} currentUserId={currentUserId} isHost={isHost} onRematch={onRematch} onCloseLobby={onCloseLobby} />}
     {!gameOver && game.hand?.phase === 'complete' && <div className={`result-banner ${game.hand.bidMade ? '' : 'failed-bid'}`}><strong>{game.hand.bidMade ? `${teamLabel(game.hand.bidderTeam ?? 'A', game, currentUserId)} made the bid` : `${teamLabel(game.hand.bidderTeam ?? 'A', game, currentUserId)} failed the bid`}</strong><span>Bid {game.hand.currentBid} · Captured {game.hand.teamPoints?.[game.hand.bidderTeam ?? 'A'] ?? 0} · Score {game.hand.scoreDelta?.[game.hand.bidderTeam ?? 'A'] ?? 0}</span></div>}
     {!gameOver && <section className={`game-board ${tableStatus ? `table-${tableStatus}` : ''}`}><div className={`table-center ${game.hand?.trumpColor ? `table-trump-${game.hand.trumpColor}` : ''}`}><strong>{game.hand?.phase === 'bidding' ? game.hand.currentBid ?? 'No bid' : teamLabel(bidder?.team ?? 'A', game, currentUserId)}</strong>{game.hand?.phase !== 'bidding' && <small>{game.hand?.currentBid ?? '—'} points</small>}{game.hand?.bidderId && <div className="table-hand-points"><strong>{teamLabel('A', game, currentUserId)} {capturedPointsForTeam(game, 'A')}</strong><strong>{teamLabel('B', game, currentUserId)} {capturedPointsForTeam(game, 'B')}</strong></div>}</div>{showShuffle && <ShuffleAnimation />}<TableCards trick={tableTrick} players={game.players} visualPosition={visualPosition} biddingStatus={game.hand?.phase === 'bidding' ? `${currentPlayer?.name ?? 'Player'} is bidding` : undefined} crowLogos={crowLogos} catalog={catalog} placements={placements} cardFonts={cardFonts} />{game.players.map((player, index) => { const bid = latestBids.get(player.id); const position = visualPosition(index); return <div className={`player-position player-${position} ${player.id === currentPlayer?.id ? 'is-turn' : ''}`} key={player.id}><Avatar label={player.name} color={avatarColors[index]} />{player.id === dealer?.id && <span className="dealer-chip">Dealer</span>}<span>{player.name}{player.id === currentUserId ? ' · You' : ''}</span><small>{player.isAi ? 'AI' : ''}</small>{game.hand?.phase === 'bidding' && <span className={`table-bid-status ${player.id === currentPlayer?.id ? 'bidding-now' : ''}`}>{player.id === currentPlayer?.id && 'Bidding'}{player.id !== currentPlayer?.id && bid && (bid.passed ? 'Passed' : `Bid ${bid.amount}`)}{player.id !== currentPlayer?.id && !bid && 'Not bid'}</span>}</div> })}</section>}
     {!gameOver && game.hand?.phase === 'trump' && <section className="action-panel"><p className="eyebrow">Trump selection</p><h2>{isBidder ? 'Which color will be trump?' : `${bidder?.name ?? 'The winning bidder'} is choosing trump`}</h2>{isBidder ? <div className="color-actions">{availableTrumpColors.map((color) => <button className={`color-choice color-${color}`} key={color} onClick={() => onTrump(color)}>{color}</button>)}</div> : <p className="muted-note">The winning bidder chooses a color they still hold.</p>}</section>}
-    {!gameOver && <section className="hand-panel"><div className="hand-cards">{sortHand(me?.hand ?? []).map((card) => <CardView key={card.id} card={card} selected={selectedDiscard.includes(card.id)} crowLogo={crowLogos[currentUserId ?? ''] ?? null} catalog={catalog} animation={cardAnimation} font={cardFonts[currentUserId ?? ''] ?? null} onClick={game.hand?.phase === 'kitty' && isBidder ? () => toggleDiscard(card) : game.hand?.phase === 'playing' && isMyTurn && legalCardIds.has(card.id) ? () => onCard(card.id) : undefined} />)}</div>{game.hand?.phase === 'bidding' && <div className="bid-controls"><button className="pass-button" disabled={!isMyTurn} onClick={() => onBid(null)}>Pass</button><div className="bid-options">{bidOptions.map((bid) => <button key={bid} disabled={!isMyTurn} onClick={() => onBid(bid)}>{bid}</button>)}</div></div>}{game.hand?.phase === 'kitty' && isBidder && <button className="button primary discard-button" disabled={selectedDiscard.length !== 5} onClick={() => { onDiscard(selectedDiscard); setSelectedDiscard([]) }}>Discard selected cards →</button>}</section>}
+    {!gameOver && <section className="hand-panel"><div className="hand-cards">{sortHand(me?.hand ?? [], game.hand?.trumpColor).map((card) => <CardView key={card.id} card={card} selected={selectedDiscard.includes(card.id)} crowLogo={crowLogos[currentUserId ?? ''] ?? null} catalog={catalog} animation={cardAnimation} font={cardFonts[currentUserId ?? ''] ?? null} onClick={game.hand?.phase === 'kitty' && isBidder ? () => toggleDiscard(card) : game.hand?.phase === 'playing' && isMyTurn && legalCardIds.has(card.id) ? () => onCard(card.id) : undefined} />)}</div>{game.hand?.phase === 'bidding' && <div className="bid-controls"><button className="pass-button" disabled={!isMyTurn} onClick={() => onBid(null)}>Pass</button><div className="bid-options">{bidOptions.map((bid) => <button key={bid} disabled={!isMyTurn} onClick={() => onBid(bid)}>{bid}</button>)}</div></div>}{game.hand?.phase === 'kitty' && isBidder && <button className="button primary discard-button" disabled={selectedDiscard.length !== 5} onClick={() => { onDiscard(selectedDiscard); setSelectedDiscard([]) }}>Discard selected cards →</button>}</section>}
     {!gameOver && (game.hand?.phase === 'playing' || game.hand?.phase === 'complete') && <TrickPanel trick={lastTrick} players={game.players} completed crowLogos={crowLogos} catalog={catalog} />}
     {!gameOver && game.hand?.phase === 'complete' && <section className="next-hand-panel"><div><p className="eyebrow">Hand complete</p><h2>Scores: {teamLabel('A', game, currentUserId)} {game.scores.A} · {teamLabel('B', game, currentUserId)} {game.scores.B}</h2></div><p className="muted-note">Dealing the next hand…</p></section>}
     <div className="game-note"><span className="rules-icon">R</span><p>{sessionId ? 'Game state is saved and synchronized with everyone at the table.' : 'Connecting this table to the active session…'}</p></div>
@@ -649,13 +841,18 @@ function CardView({ card, selected, onClick, crowLogo, catalog, animation, place
   return <div className={`playing-card color-${card.color} ${selected ? 'selected' : ''} ${onClick ? 'playable' : ''} ${typeface}`} onClick={onClick}><strong>{card.value}</strong><small>{card.color}</small></div>
 }
 
-function sortHand(hand: Card[]) {
+function sortHand(hand: Card[], trumpColor?: CardColor) {
   const colorOrder = ['black', 'red', 'yellow', 'green']
+  const position = (card: Card) => {
+    if (card.kind === 'crow') return trumpColor ? colorOrder.indexOf(trumpColor) - 0.5 : -1
+    return colorOrder.indexOf(card.color)
+  }
   return [...hand].sort((left, right) => {
-    if (left.kind === 'crow') return -1
-    if (right.kind === 'crow') return 1
-    const colorDifference = colorOrder.indexOf(left.color) - colorOrder.indexOf(right.color)
-    return colorDifference || right.value - left.value
+    const leftPosition = position(left)
+    const rightPosition = position(right)
+    if (leftPosition !== rightPosition) return leftPosition - rightPosition
+    if (left.kind === 'crow' || right.kind === 'crow') return 0
+    return right.value - left.value
   })
 }
 

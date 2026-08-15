@@ -1,36 +1,113 @@
 import { canPlayCard, cardBeats, leadColorForTrick } from './rules'
 import { cardPoints } from './rules'
-import type { Card, CardColor, HandKnowledge, HandState, PlayerState, Trick } from './types'
+import { COLORS, type Card, type CardColor, type HandKnowledge, type HandState, type NumberCard, type PlayerState, type Trick } from './types'
+import { riemanRules } from '../rules/riemanRules'
 
-export function chooseAiBid(hand: Card[], currentBid: number | null, aiPlayer: PlayerState, players: PlayerState[], bidState: HandState) {
-  const colorStrength = (color: CardColor) => hand.reduce((total, card) => {
-    if (card.kind !== 'number' || card.color !== color) return total
-    if (card.value === 14) return total + 8
-    if (card.value === 13) return total + 5
-    if (card.value === 12) return total + 3
-    if (card.value === 11 || card.value === 10) return total + 2
+const TRUMP_TOTAL = riemanRules.deck.cardsPerColor + riemanRules.deck.crowCards
+const HIGH_CARD_STRENGTH: Record<number, number> = { 14: 8, 13: 5, 12: 3, 11: 2, 10: 2 }
+const CROW_STRENGTH = 12
+const OPENING_BAR = 20
+const CEILING_FLOOR_STRENGTH = 10
+const DUMP_NUDGE_TRUMP_HIGH = 8
+const DUMP_NUDGE_MIN_DUMP = 12
+const CROW_DEPTH_NUDGE_MIN_DEPTH = 4
+const POINT_VALUES = new Set([5, 10, 14])
+const BOSS_COMPANION_MIN = 13
+
+function evaluateTrumpSuit(hand: Card[], trumpColor: CardColor) {
+  const numbers = hand.filter((card): card is NumberCard => card.kind === 'number')
+  const trumpCards = numbers.filter((card) => card.color === trumpColor)
+  const high = trumpCards.reduce((total, card) => total + (HIGH_CARD_STRENGTH[card.value] ?? 0), 0)
+  const depth = Math.max(0, trumpCards.length - 2) * 2
+  const crow = hand.some((card) => card.kind === 'crow') ? CROW_STRENGTH : 0
+  const control = high + depth + crow
+  const dump = COLORS.reduce((total, color) => {
+    if (color === trumpColor) return total
+    const suit = numbers.filter((card) => card.color === color)
+    if (suit.length === 0) return total
+    const hasFiveOrTen = suit.some((card) => card.value === 5 || card.value === 10)
+    const hasFourteen = suit.some((card) => card.value === 14)
+    if (!hasFiveOrTen && !hasFourteen) return total + suit.length * 2
+    if (hasFourteen && !hasFiveOrTen) return total + (suit.length - 1) * 1.5
+    if (hasFourteen) return total + (suit.length - suit.filter((card) => card.value === 5 || card.value === 10 || card.value === 14).length)
     return total
   }, 0)
-  const bestColorStrength = Math.max(...(['black', 'red', 'yellow', 'green'] as CardColor[]).map(colorStrength))
-  const crowStrength = hand.some((card) => card.kind === 'crow') ? 12 : 0
-  const strength = bestColorStrength + crowStrength
-  const estimatedBid = Math.min(85, 65 + Math.floor(Math.max(0, strength - 14) / 5) * 5)
+  return { control, high, dump, depth, crow, score: control + dump }
+}
+
+export function chooseAiBid(hand: Card[], currentBid: number | null, aiPlayer: PlayerState, players: PlayerState[], bidState: HandState) {
+  const best = COLORS.reduce((winner, color) => {
+    const candidate = evaluateTrumpSuit(hand, color)
+    return candidate.score > winner.score ? candidate : winner
+  }, evaluateTrumpSuit(hand, COLORS[0]))
+  const riskShift = aiPlayer.difficulty === 'Skilled' ? 5 : aiPlayer.difficulty === 'Newbie' ? -5 : 0
+  const dumpNudge = best.high >= DUMP_NUDGE_TRUMP_HIGH && best.dump >= DUMP_NUDGE_MIN_DUMP ? 5 : 0
+  const crowDepthNudge = best.crow && best.depth >= CROW_DEPTH_NUDGE_MIN_DEPTH ? 5 : 0
+  const ceiling = Math.min(90, Math.max(65, 65 + Math.floor(Math.max(0, best.control - CEILING_FLOOR_STRENGTH) / 5) * 5 + dumpNudge + crowDepthNudge + riskShift))
+  if (best.score < OPENING_BAR) return null
+  if (currentBid === null) return 65
   const currentBidder = players.find((player) => player.id === bidState.bidderId)
-  const partnerHasBid = currentBidder?.team === aiPlayer.team && currentBidder.id !== aiPlayer.id
-  const exceptionalHand = strength >= 31
-  if (currentBid === null) return strength >= 14 ? 65 : null
-  if (partnerHasBid && !exceptionalHand) return null
+  const partnerHasBid = Boolean(currentBidder && currentBidder.team === aiPlayer.team && currentBidder.id !== aiPlayer.id)
+  if (partnerHasBid) return ceiling >= currentBid + 10 ? currentBid + 5 : null
   const nextBid = currentBid + 5
-  return nextBid <= estimatedBid ? nextBid : null
+  return nextBid <= ceiling ? nextBid : null
 }
 
 export function chooseAiTrump(hand: Card[]): CardColor {
-  const colors: CardColor[] = ['black', 'red', 'yellow', 'green']
-  return colors.sort((left, right) => hand.filter((card) => card.kind === 'number' && card.color === right).length - hand.filter((card) => card.kind === 'number' && card.color === left).length)[0]
+  return planKitty(hand).trump
+}
+
+export function planKitty(hand: Card[]): { trump: CardColor; discardIds: string[] } {
+  const numbers = hand.filter((card): card is NumberCard => card.kind === 'number')
+  const trump = COLORS.reduce<{ color: CardColor; score: number }>((best, color) => {
+    const score = evaluateTrumpSuit(hand, color).score
+    return score > best.score ? { color, score } : best
+  }, { color: COLORS[0], score: -Infinity }).color
+  const voidable: NumberCard[][] = []
+  const bossPools: NumberCard[][] = []
+  const protectedPools: NumberCard[][] = []
+  for (const color of COLORS) {
+    if (color === trump) continue
+    const suit = numbers.filter((card) => card.color === color)
+    const count = suit.filter((card) => POINT_VALUES.has(card.value))
+    const nonCount = suit.filter((card) => !POINT_VALUES.has(card.value))
+    if (count.length === 0) {
+      voidable.push(nonCount)
+      continue
+    }
+    const descending = [...nonCount].sort((a, b) => b.value - a.value)
+    const kept = new Set<NumberCard>()
+    if (count.some((card) => card.value === 14) && descending[0] && descending[0].value >= BOSS_COMPANION_MIN) kept.add(descending[0])
+    if (count.some((card) => card.value === 5 || card.value === 10)) {
+      const protector = descending.find((card) => !kept.has(card))
+      if (protector) kept.add(protector)
+    }
+    const shed = descending.filter((card) => !kept.has(card))
+    ;(count.some((card) => card.value === 14) ? bossPools : protectedPools).push(shed)
+  }
+  const chosen: NumberCard[] = []
+  const takeLowest = (cards: NumberCard[], target: number) => {
+    const sorted = [...cards].sort((a, b) => a.value - b.value)
+    while (chosen.length < target && sorted.length) chosen.push(sorted.shift()!)
+  }
+  for (const suit of [...voidable].sort((a, b) => a.length - b.length)) {
+    takeLowest(suit, 5)
+    if (chosen.length >= 5) break
+  }
+  for (const suit of bossPools) {
+    takeLowest(suit, 5)
+    if (chosen.length >= 5) break
+  }
+  if (chosen.length < 5) takeLowest(protectedPools.flat(), 5)
+  if (chosen.length < 5) {
+    const trumpNumbers = numbers.filter((card) => card.color === trump && !POINT_VALUES.has(card.value))
+    takeLowest(trumpNumbers.filter((card) => !chosen.includes(card)), 5)
+  }
+  return { trump, discardIds: chosen.slice(0, 5).map((card) => card.id) }
 }
 
 export function chooseAiDiscard(hand: Card[]) {
-  return [...hand].filter((card) => card.kind === 'number' && ![5, 10, 14].includes(card.value)).sort((left, right) => (left.kind === 'number' ? left.value : 99) - (right.kind === 'number' ? right.value : 99)).slice(0, 5).map((card) => card.id)
+  return planKitty(hand).discardIds
 }
 
 export function chooseAiCard(hand: Card[], trick: Trick | undefined, trumpColor?: CardColor, aiPlayer?: PlayerState, bidder?: PlayerState) {
@@ -44,14 +121,7 @@ export function chooseAiCardWithKnowledge(hand: Card[], knowledge: HandKnowledge
   const leadColor = leadColorForTrick(trick, trumpColor)
   const legalCards = hand.filter((card) => canPlayCard(hand, card, leadColor, trumpColor))
   if (!trick || trick.cards.length === 0) {
-    const madeTrump = aiPlayer?.team === knowledge.bidderTeam
-    if (madeTrump && hand.some((card) => card.kind === 'crow')) return hand.find((card) => card.kind === 'crow')!
-    if (madeTrump && trumpColor) {
-      const trumpCards = legalCards.filter((card) => card.kind === 'number' && card.color === trumpColor)
-      if (trumpCards.length > 1) return lowestCard(trumpCards)
-    }
-    const nonTrumpCards = legalCards.filter((card) => card.kind === 'number' && card.color !== trumpColor)
-    return highestCard(nonTrumpCards.length ? nonTrumpCards : legalCards)
+    return chooseLeadCard(hand, knowledge, aiPlayer, players)
   }
   const winningCard = trick.cards.reduce((winner, played) => cardBeats(played.card, winner.card, leadColor, trumpColor) ? played : winner, trick.cards[0])
   const winningCards = legalCards.filter((card) => cardBeats(card, winningCard.card, leadColor, trumpColor))
@@ -59,7 +129,7 @@ export function chooseAiCardWithKnowledge(hand: Card[], knowledge: HandKnowledge
   const currentWinnerIsPartner = Boolean(currentWinnerPlayer && aiPlayer && currentWinnerPlayer.team === aiPlayer.team && currentWinnerPlayer.id !== aiPlayer.id)
   if (currentWinnerIsPartner && knowledge.currentTrickPoints > 0) {
     const pointWinners = winningCards.filter((card) => cardPoints(card) > 0)
-    if (pointWinners.length) return lowestCard(pointWinners)
+    if (pointWinners.length) return [...pointWinners].sort((left, right) => cardPoints(right) - cardPoints(left) || rankForLowest(left) - rankForLowest(right))[0]
   }
   if (winningCards.length) {
     const winningTrump = winningCards.filter((card) => card.kind === 'crow' || (card.kind === 'number' && card.color === trumpColor))
@@ -106,10 +176,61 @@ function highestCard(cards: Card[]) {
   })[0]
 }
 
+function chooseLeadCard(hand: Card[], knowledge: HandKnowledge, aiPlayer?: PlayerState, players: PlayerState[] = []): Card {
+  const trumpColor = knowledge.trumpColor
+  const madeTrump = Boolean(aiPlayer && aiPlayer.team === knowledge.bidderTeam)
+  if (madeTrump && trumpColor) {
+    const myTrump = hand.filter((card) => card.kind === 'crow' || (card.kind === 'number' && card.color === trumpColor))
+    const trumpLeft = TRUMP_TOTAL - myTrump.length - knowledge.trumpCardsPlayed.length
+    const opponentsOut = trumpLeft <= 0 || opponentsVoidInTrump(knowledge, aiPlayer, players)
+    if (!opponentsOut && myTrump.length) {
+      const myHighest = highestCard(myTrump)
+      const myHighestValue = myHighest.kind === 'crow' ? 15 : myHighest.value
+      const currentHighest = highestRemainingTrump(knowledge, trumpColor)
+      if (myHighestValue >= currentHighest) return myHighest
+      const nonPointTrump = myTrump.filter((card) => card.kind === 'number' && !POINT_VALUES.has(card.value))
+      if (nonPointTrump.length) return lowestCard(nonPointTrump)
+    }
+  }
+  if (!madeTrump && trumpColor) {
+    for (const suit of COLORS) {
+      if (suit === trumpColor) continue
+      const highestRemaining = highestRemainingInSuit(knowledge, suit)
+      const boss = hand.find((card) => card.kind === 'number' && card.color === suit && card.value === highestRemaining)
+      if (boss) return boss
+    }
+  }
+  const nonPointOffSuit = hand.filter((card) => card.kind === 'number' && card.color !== trumpColor && !POINT_VALUES.has(card.value))
+  return lowestCard(nonPointOffSuit.length ? nonPointOffSuit : hand)
+}
+
+function highestRemainingTrump(knowledge: HandKnowledge, trumpColor: CardColor): number {
+  const played = new Set(knowledge.trumpCardsPlayed.filter((card): card is NumberCard => card.kind === 'number').map((card) => card.value))
+  for (let value = 14; value >= 1; value--) if (!played.has(value)) return value
+  return 0
+}
+
+function highestRemainingInSuit(knowledge: HandKnowledge, suit: CardColor): number {
+  const played = new Set(knowledge.playedCards.filter((card): card is NumberCard => card.kind === 'number' && card.color === suit).map((card) => card.value))
+  for (let value = 14; value >= 1; value--) if (!played.has(value)) return value
+  return 0
+}
+
+function opponentsVoidInTrump(knowledge: HandKnowledge, aiPlayer: PlayerState | undefined, players: PlayerState[]): boolean {
+  const trumpColor = knowledge.trumpColor
+  if (!trumpColor || !aiPlayer) return false
+  const opponents = players.filter((player) => player.team !== aiPlayer.team && player.id !== aiPlayer.id)
+  return opponents.length > 0 && opponents.every((opponent) => (knowledge.voidColorsByPlayer[opponent.id] ?? []).includes(trumpColor))
+}
+
 function lowestCard(cards: Card[]) {
   return [...cards].sort((left, right) => {
     if (left.kind === 'crow') return 1
     if (right.kind === 'crow') return -1
     return left.value - right.value
   })[0]
+}
+
+function rankForLowest(card: Card) {
+  return card.kind === 'crow' ? 15 : card.value
 }
