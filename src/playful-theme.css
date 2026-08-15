@@ -133,6 +133,7 @@ input, button, select { font-size: 16px; }
 .table-card-position-2 { left: 50%; top: 24%; transform: translateX(-50%) rotate(0deg); }
 .table-card-position-3 { left: 24%; top: 50%; transform: translateY(-50%) rotate(0deg); }
 .trick-capture .table-card-play { animation-duration: .55s; animation-delay: .5s; animation-timing-function: ease-in; animation-fill-mode: forwards; }
+.trick-capture-rook .table-card-play { animation-delay: 1s; }
 .trick-capture .capture-target-0 { animation-name: capture-to-bottom; }
 .trick-capture .capture-target-1 { animation-name: capture-to-right; }
 .trick-capture .capture-target-2 { animation-name: capture-to-top; }

@@ -103,7 +103,7 @@ export function playCard(session: SessionState, playerId: string, cardId: string
   trick.cards.push({ playerId, card })
   if (trick.cards.length === 4) {
     trick.winnerId = findTrickWinner(trick, session.hand.trumpColor)
-    trick.visibleUntil = Date.now() + 500
+    trick.visibleUntil = Date.now() + (card.kind === 'crow' ? 1000 : 500)
   }
   if (trick.cards.length === 4 && session.players.every((candidate) => candidate.hand.length === 0)) {
     session.hand.phase = 'complete'
