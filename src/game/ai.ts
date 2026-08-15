@@ -127,9 +127,14 @@ export function chooseAiCardWithKnowledge(hand: Card[], knowledge: HandKnowledge
   const winningCards = legalCards.filter((card) => cardBeats(card, winningCard.card, leadColor, trumpColor))
   const currentWinnerPlayer = players.find((player) => player.id === knowledge.currentWinnerId)
   const currentWinnerIsPartner = Boolean(currentWinnerPlayer && aiPlayer && currentWinnerPlayer.team === aiPlayer.team && currentWinnerPlayer.id !== aiPlayer.id)
-  if (currentWinnerIsPartner && knowledge.currentTrickPoints > 0) {
-    const pointWinners = winningCards.filter((card) => cardPoints(card) > 0)
-    if (pointWinners.length) return [...pointWinners].sort((left, right) => cardPoints(right) - cardPoints(left) || rankForLowest(left) - rankForLowest(right))[0]
+  if (currentWinnerIsPartner) {
+    const nonBeating = legalCards.filter((card) => !cardBeats(card, winningCard.card, leadColor, trumpColor))
+    const safePoints = nonBeating.filter((card) => cardPoints(card) > 0)
+    if (safePoints.length) return [...safePoints].sort((left, right) => cardPoints(right) - cardPoints(left) || rankForLowest(left) - rankForLowest(right))[0]
+    if (nonBeating.length) {
+      const nonBeatingNonTrump = nonBeating.filter((card) => card.kind === 'number' && card.color !== trumpColor)
+      return lowestCard(nonBeatingNonTrump.length ? nonBeatingNonTrump : nonBeating)
+    }
   }
   if (winningCards.length) {
     const winningTrump = winningCards.filter((card) => card.kind === 'crow' || (card.kind === 'number' && card.color === trumpColor))
