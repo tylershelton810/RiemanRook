@@ -448,7 +448,6 @@ footer { color: #91a09f; }
 .favorite-bar .favorite-fill-yellow { background: #e0b95e; }
 .favorite-bar .favorite-fill-green { background: #8bbfae; }
 .stats-empty { padding: 30px 0 12px; text-align: center; color: var(--muted); font-size: 13px; }
-.stats-note-top { margin: 18px 0 0; }
 .stats-section + .stats-section { margin-top: 26px; padding-top: 22px; border-top: 1px solid #e1eae7; }
 .stats-section-label { margin: 0 0 4px; font: 700 12px 'DM Mono'; text-transform: uppercase; letter-spacing: .08em; color: var(--green); }
 .rules-body { margin-top: 18px; }
