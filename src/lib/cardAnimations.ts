@@ -1,11 +1,11 @@
 export const COINS_PER_CARD_ANIMATION = 25
 
 export const CARD_ANIMATIONS = [
-  { id: 'pulse', name: 'Pulse', description: 'A glowing ring pulses your card’s color outward.' },
-  { id: 'wiggle', name: 'Wiggle', description: 'Your cards wiggle themselves.' },
-  { id: 'wave', name: 'Wave', description: 'A wave ripples around your cards.' },
-  { id: 'shine', name: 'Shine', description: 'A soft light sweeps across your cards.' },
-  { id: 'sparkle', name: 'Sparkle', description: 'Tiny sparkles dance around your cards.' },
+  { id: 'pulse', name: 'Pulse', description: 'A glowing ring pulses your rook’s color outward.' },
+  { id: 'wiggle', name: 'Wiggle', description: 'Your rook card wiggles itself.' },
+  { id: 'wave', name: 'Wave', description: 'A wave ripples around your rook card.' },
+  { id: 'shine', name: 'Shine', description: 'A soft light sweeps across your rook card.' },
+  { id: 'sparkle', name: 'Sparkle', description: 'Tiny sparkles dance around your rook card.' },
 ] as const
 
 export type CardAnimationId = typeof CARD_ANIMATIONS[number]['id']
