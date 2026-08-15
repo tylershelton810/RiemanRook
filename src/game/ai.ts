@@ -138,7 +138,7 @@ export function chooseAiCardWithKnowledge(hand: Card[], knowledge: HandKnowledge
   }
   if (winningCards.length) {
     const winningTrump = winningCards.filter((card) => card.kind === 'crow' || (card.kind === 'number' && card.color === trumpColor))
-    return highestCard(winningTrump.length ? winningTrump : winningCards)
+    return lowestCard(winningTrump.length ? winningTrump : winningCards)
   }
   const nonTrumpCards = legalCards.filter((card) => card.kind === 'number' && card.color !== trumpColor)
   return lowestCard(nonTrumpCards.length ? nonTrumpCards : legalCards)
