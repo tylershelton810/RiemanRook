@@ -5,7 +5,7 @@ export const CARD_FONTS = [
   { id: 'fancy', name: 'Fancy', description: 'Flourished script numerals with a hand-drawn feel.' },
   { id: 'display', name: 'Display', description: 'Heavy, condensed numerals that fill the corner.' },
   { id: 'serif', name: 'Serif', description: 'Old-fashioned print numerals with tapered strokes.' },
-  { id: 'fire', name: 'Fire', description: 'Your cards burn — flickering flame, rising embers, and a wisp of smoke.' },
+  { id: 'fire', name: 'Liquid', description: 'Your cards glisten — shimmering color, rippling waves, and a drifting haze.' },
 ] as const
 
 export type CardFontId = typeof CARD_FONTS[number]['id']
