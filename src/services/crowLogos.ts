@@ -12,6 +12,10 @@ export interface CrowWallet {
   purchasedCrowLogos: string[]
   purchasedCardAnimations: string[]
   cardAnimation: string | null
+  purchasedPlacements: string[]
+  placement: string | null
+  purchasedCardFonts: string[]
+  cardFont: string | null
 }
 
 const BUCKET = 'crow-logos'
@@ -30,13 +34,17 @@ export async function getMyCrowLogo(userId: string): Promise<string | null> {
 
 export async function getMyWallet(userId: string): Promise<CrowWallet> {
   const client = requireClient()
-  const { data, error } = await client.from('profiles').select('tokens, purchased_crow_logos, purchased_card_animations, card_animation').eq('id', userId).maybeSingle()
+  const { data, error } = await client.from('profiles').select('tokens, purchased_crow_logos, purchased_card_animations, card_animation, purchased_placements, placement, purchased_card_fonts, card_font').eq('id', userId).maybeSingle()
   if (error) throw error
   return {
     tokens: data?.tokens ?? 0,
     purchasedCrowLogos: data?.purchased_crow_logos ?? [],
     purchasedCardAnimations: data?.purchased_card_animations ?? [],
     cardAnimation: data?.card_animation ?? null,
+    purchasedPlacements: data?.purchased_placements ?? [],
+    placement: data?.placement ?? null,
+    purchasedCardFonts: data?.purchased_card_fonts ?? [],
+    cardFont: data?.card_font ?? null,
   }
 }
 

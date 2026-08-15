@@ -115,6 +115,30 @@ export async function getLobbyMemberLogos(lobbyId: string) {
   return logos
 }
 
+export async function getLobbyMemberPlacements(lobbyId: string) {
+  const client = requireClient()
+  const { data, error } = await client.from('lobby_players').select('user_id, profile:profiles(placement)').eq('lobby_id', lobbyId)
+  if (error) throw error
+  const placements: Record<string, string | null> = {}
+  ;(data ?? []).forEach((row) => {
+    const profile = Array.isArray(row.profile) ? row.profile[0] : row.profile
+    placements[row.user_id] = profile?.placement ?? null
+  })
+  return placements
+}
+
+export async function getLobbyMemberFonts(lobbyId: string) {
+  const client = requireClient()
+  const { data, error } = await client.from('lobby_players').select('user_id, profile:profiles(card_font)').eq('lobby_id', lobbyId)
+  if (error) throw error
+  const fonts: Record<string, string | null> = {}
+  ;(data ?? []).forEach((row) => {
+    const profile = Array.isArray(row.profile) ? row.profile[0] : row.profile
+    fonts[row.user_id] = profile?.card_font ?? null
+  })
+  return fonts
+}
+
 export async function joinLobby(lobbyId: string, userId: string) {
   const members = await getLobbyMembers(lobbyId)
   if (members.some((member) => member.user_id === userId)) return members

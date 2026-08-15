@@ -23,7 +23,7 @@ begin
   if p_animation_id is null or p_animation_id = '' or p_animation_id = 'none' then
     raise exception 'The plain frame is already yours.';
   end if;
-  if p_animation_id not in ('pulse','wiggle','shine','sparkle') then
+  if p_animation_id not in ('pulse','wiggle','wave','shine','sparkle') then
     raise exception 'That frame animation cannot be bought here.';
   end if;
   select * into profile_row from public.profiles where id = auth.uid() for update;
@@ -62,7 +62,7 @@ begin
     update public.profiles set card_animation = null where id = auth.uid();
     return;
   end if;
-  if p_animation_id not in ('pulse','wiggle','shine','sparkle') then
+  if p_animation_id not in ('pulse','wiggle','wave','shine','sparkle') then
     raise exception 'That frame animation is not available.';
   end if;
   if not (p_animation_id = any(profile_row.purchased_card_animations)) then

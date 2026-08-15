@@ -3,14 +3,18 @@ import type { ChangeEvent, FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import type { Difficulty, LobbySeat } from './lib/types'
-import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getLobbySnapshot, getLobbyMembers, getLobbyMemberLogos, getMyLobbies, joinLobby, leaveLobby, membersToSeats, setSeatTeam as setLobbySeatTeam, swapSeats as swapLobbySeats, updateLobbyName, updateLobbySettings } from './services/lobbies'
+import { addAiSeat, createLobby, ensureProfile, findLobbyByCode, getLobbySnapshot, getLobbyMembers, getLobbyMemberFonts, getLobbyMemberLogos, getLobbyMemberPlacements, getMyLobbies, joinLobby, leaveLobby, membersToSeats, setSeatTeam as setLobbySeatTeam, swapSeats as swapLobbySeats, updateLobbyName, updateLobbySettings } from './services/lobbies'
 import type { LobbySummary } from './services/lobbies'
 import { getMyCrowLogo, getMyWallet, listCrowLogos, purchaseCrowLogo, setCrowLogo, uploadCrowLogo, crowLogoUrl } from './services/crowLogos'
 import type { CrowLogoRecord, CrowWallet } from './services/crowLogos'
 import { purchaseCardAnimation, setCardAnimation } from './services/cardAnimations'
+import { purchasePlacement, setPlacement } from './services/placements'
+import { purchaseCardFont, setCardFont } from './services/cardFonts'
 import { BUILTIN_CROW_LOGOS } from './lib/crowLogos'
 import { TOKENS_PER_CROW_FACE, isPaidCrowLogo, tokensForWinningScore } from './lib/tokens'
 import { CARD_ANIMATIONS, COINS_PER_CARD_ANIMATION } from './lib/cardAnimations'
+import { PLACEMENTS, COINS_PER_PLACEMENT } from './lib/placements'
+import { CARD_FONTS, COINS_PER_CARD_FONT } from './lib/cardFonts'
 import { closeLobby, dealNextHand, getActiveGameSession, getCurrentGameSession, getPlayerStatistics, reconcileAiSeats, rematchSession, startGameSession, submitBid, submitTrump, submitDiscard, submitCard } from './services/sessions'
 import { createConfetti } from './game/celebration'
 import type { Card, SessionState } from './game/types'
@@ -57,6 +61,8 @@ function App() {
   const [myCrowLogo, setMyCrowLogo] = useState<string | null>(null)
   const [crowLogoCatalog, setCrowLogoCatalog] = useState<CrowLogoRecord[]>([])
   const [crowLogosByPlayer, setCrowLogosByPlayer] = useState<Record<string, string | null>>({})
+  const [placementsByPlayer, setPlacementsByPlayer] = useState<Record<string, string | null>>({})
+  const [fontsByPlayer, setFontsByPlayer] = useState<Record<string, string | null>>({})
   const [wallet, setWallet] = useState<CrowWallet | null>(null)
 
   useEffect(() => {
@@ -179,6 +185,8 @@ function App() {
       try {
         setSeats(await getLobbySnapshot(activeLobbyId))
         getLobbyMemberLogos(activeLobbyId).then(setCrowLogosByPlayer).catch(() => undefined)
+        getLobbyMemberPlacements(activeLobbyId).then(setPlacementsByPlayer).catch(() => undefined)
+        getLobbyMemberFonts(activeLobbyId).then(setFontsByPlayer).catch(() => undefined)
         const started = await getCurrentGameSession(activeLobbyId)
         if (started && !activeGame) {
           setActiveGameSessionId(started.id)
@@ -320,7 +328,7 @@ function App() {
     try {
       const tokens = await purchaseCrowLogo(logoId)
       await setCrowLogo(session.user.id, logoId)
-      setWallet((current) => ({ tokens, purchasedCrowLogos: current?.purchasedCrowLogos.includes(logoId) ? current.purchasedCrowLogos : [...(current?.purchasedCrowLogos ?? []), logoId], purchasedCardAnimations: current?.purchasedCardAnimations ?? [], cardAnimation: current?.cardAnimation ?? null }))
+      setWallet((current) => ({ tokens, purchasedCrowLogos: current?.purchasedCrowLogos.includes(logoId) ? current.purchasedCrowLogos : [...(current?.purchasedCrowLogos ?? []), logoId], purchasedCardAnimations: current?.purchasedCardAnimations ?? [], cardAnimation: current?.cardAnimation ?? null, purchasedPlacements: current?.purchasedPlacements ?? [], placement: current?.placement ?? null, purchasedCardFonts: current?.purchasedCardFonts ?? [], cardFont: current?.cardFont ?? null }))
       setMyCrowLogo(logoId)
       showToast('Crow face bought and equipped.')
     } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to buy that crow face.') }
@@ -331,7 +339,7 @@ function App() {
     try {
       const tokens = await purchaseCardAnimation(animationId)
       await setCardAnimation(animationId)
-      setWallet((current) => ({ tokens, purchasedCrowLogos: current?.purchasedCrowLogos ?? [], purchasedCardAnimations: current?.purchasedCardAnimations.includes(animationId) ? current.purchasedCardAnimations : [...(current?.purchasedCardAnimations ?? []), animationId], cardAnimation: animationId }))
+      setWallet((current) => ({ tokens, purchasedCrowLogos: current?.purchasedCrowLogos ?? [], purchasedCardAnimations: current?.purchasedCardAnimations.includes(animationId) ? current.purchasedCardAnimations : [...(current?.purchasedCardAnimations ?? []), animationId], cardAnimation: animationId, purchasedPlacements: current?.purchasedPlacements ?? [], placement: current?.placement ?? null, purchasedCardFonts: current?.purchasedCardFonts ?? [], cardFont: current?.cardFont ?? null }))
       showToast('Frame animation bought and equipped.')
     } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to buy that frame animation.') }
   }
@@ -340,17 +348,55 @@ function App() {
     if (!session?.user) return showToast('Sign in to pick a frame animation.')
     try {
       await setCardAnimation(animationId)
-      setWallet((current) => ({ tokens: current?.tokens ?? 0, purchasedCrowLogos: current?.purchasedCrowLogos ?? [], purchasedCardAnimations: current?.purchasedCardAnimations ?? [], cardAnimation: animationId }))
+      setWallet((current) => current ? { ...current, cardAnimation: animationId } : null)
       showToast(animationId ? 'Frame animation equipped.' : 'Plain cards restored.')
     } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to save that frame animation.') }
+  }
+
+  const buyPlacement = async (placementId: string) => {
+    if (!session?.user) return showToast('Sign in to buy a crow placement.')
+    try {
+      const tokens = await purchasePlacement(placementId)
+      await setPlacement(placementId)
+      setWallet((current) => current ? { ...current, tokens, purchasedPlacements: current.purchasedPlacements.includes(placementId) ? current.purchasedPlacements : [...current.purchasedPlacements, placementId], placement: placementId } : null)
+      showToast('Crow placement bought and equipped.')
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to buy that crow placement.') }
+  }
+
+  const selectPlacement = async (placementId: string | null) => {
+    if (!session?.user) return showToast('Sign in to pick a crow placement.')
+    try {
+      await setPlacement(placementId)
+      setWallet((current) => current ? { ...current, placement: placementId } : null)
+      showToast(placementId ? 'Crow placement equipped.' : 'Plain crow card restored.')
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to save that crow placement.') }
+  }
+
+  const buyCardFont = async (fontId: string) => {
+    if (!session?.user) return showToast('Sign in to buy a typeface.')
+    try {
+      const tokens = await purchaseCardFont(fontId)
+      await setCardFont(fontId)
+      setWallet((current) => current ? { ...current, tokens, purchasedCardFonts: current.purchasedCardFonts.includes(fontId) ? current.purchasedCardFonts : [...current.purchasedCardFonts, fontId], cardFont: fontId } : null)
+      showToast('Typeface bought and equipped.')
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to buy that typeface.') }
+  }
+
+  const selectCardFont = async (fontId: string | null) => {
+    if (!session?.user) return showToast('Sign in to pick a typeface.')
+    try {
+      await setCardFont(fontId)
+      setWallet((current) => current ? { ...current, cardFont: fontId } : null)
+      showToast(fontId ? 'Typeface equipped.' : 'Plain typeface restored.')
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to save that typeface.') }
   }
 
   if (authLoading) return <div className="auth-loading">Loading your table…</div>
   if (isSupabaseConfigured && !session) return <AuthScreen />
 
-  if (view === 'game' && activeGame) return <GameScreen game={activeGame} sessionId={activeGameSessionId} currentUserId={session?.user.id} isHost={session?.user.id === activeLobbyHostId} crowLogos={crowLogosByPlayer} catalog={crowLogoCatalog} cardAnimation={wallet?.cardAnimation ?? null} onRematch={async () => { if (!activeGameSessionId || !activeLobbyId) return; try { setActiveGame(await rematchSession(activeGameSessionId, activeLobbyId, activeGame)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to start the rematch.') } }} onCloseLobby={async () => { if (!activeLobbyId || !session?.user.id) return; try { await closeLobby(activeLobbyId, session.user.id); setView('home') } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to close the lobby.') } }} onBid={async (amount) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitBid(activeGameSessionId, activeGame, session.user.id, amount)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to submit bid.') } }} onTrump={async (color) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitTrump(activeGameSessionId, activeGame, session.user.id, color)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to choose trump.') } }} onDiscard={async (cardIds) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitDiscard(activeGameSessionId, activeGame, session.user.id, cardIds)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to discard those cards.') } }} onCard={async (cardId) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitCard(activeGameSessionId, activeGame, session.user.id, cardId)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to play that card.') } }} onBack={() => setView('lobby')} />
+  if (view === 'game' && activeGame) return <GameScreen game={activeGame} sessionId={activeGameSessionId} currentUserId={session?.user.id} isHost={session?.user.id === activeLobbyHostId} crowLogos={crowLogosByPlayer} catalog={crowLogoCatalog} cardAnimation={wallet?.cardAnimation ?? null} placements={placementsByPlayer} cardFonts={fontsByPlayer} onRematch={async () => { if (!activeGameSessionId || !activeLobbyId) return; try { setActiveGame(await rematchSession(activeGameSessionId, activeLobbyId, activeGame)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to start the rematch.') } }} onCloseLobby={async () => { if (!activeLobbyId || !session?.user.id) return; try { await closeLobby(activeLobbyId, session.user.id); setView('home') } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to close the lobby.') } }} onBid={async (amount) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitBid(activeGameSessionId, activeGame, session.user.id, amount)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to submit bid.') } }} onTrump={async (color) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitTrump(activeGameSessionId, activeGame, session.user.id, color)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to choose trump.') } }} onDiscard={async (cardIds) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitDiscard(activeGameSessionId, activeGame, session.user.id, cardIds)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to discard those cards.') } }} onCard={async (cardId) => { if (!activeGameSessionId || !session?.user.id) return; try { setActiveGame(await submitCard(activeGameSessionId, activeGame, session.user.id, cardId)) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to play that card.') } }} onBack={() => setView('lobby')} />
   if (view === 'lobby') return <Lobby code={lobbyCode} name={lobbyName || 'Crow Table'} onRename={async (nextName) => { if (!activeLobbyId || !session?.user.id) return; try { setLobbyName((await updateLobbyName(activeLobbyId, session.user.id, nextName)).name) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to rename the table.') } }} seats={displaySeats} timer={timer} setTimer={setTimer} winningScore={winningScore} setWinningScore={setWinningScore} onSettingsChange={async (nextScore) => { if (!activeLobbyId || !session?.user.id) return; try { setWinningScore((await updateLobbySettings(activeLobbyId, session.user.id, { turnTimer: timer, winningScore: nextScore })).winningScore) } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to update the winning score.') } }} makeAi={makeAi} setDifficulty={setDifficulty} hostId={activeLobbyHostId} currentUserId={session?.user.id} onBack={() => setView('home')} onStart={startGame} filled={filled} onSwapSeats={swapSeats} onSetSeatTeam={setSeatTeam} />
-  if (view === 'settings') return <SettingsScreen currentLogo={myCrowLogo} catalog={crowLogoCatalog} tokens={wallet?.tokens ?? 0} purchasedLogos={wallet?.purchasedCrowLogos ?? []} currentAnimation={wallet?.cardAnimation ?? null} purchasedAnimations={wallet?.purchasedCardAnimations ?? []} onBack={() => setView('home')} onSelect={selectCrowLogo} onPurchase={buyCrowLogo} onSelectAnimation={selectCardAnimation} onPurchaseAnimation={buyCardAnimation} onUpload={uploadCrowLogoFile} />
+  if (view === 'settings') return <SettingsScreen currentLogo={myCrowLogo} catalog={crowLogoCatalog} tokens={wallet?.tokens ?? 0} purchasedLogos={wallet?.purchasedCrowLogos ?? []} currentAnimation={wallet?.cardAnimation ?? null} purchasedAnimations={wallet?.purchasedCardAnimations ?? []} currentPlacement={wallet?.placement ?? null} purchasedPlacements={wallet?.purchasedPlacements ?? []} currentFont={wallet?.cardFont ?? null} purchasedFonts={wallet?.purchasedCardFonts ?? []} onBack={() => setView('home')} onSelect={selectCrowLogo} onPurchase={buyCrowLogo} onSelectAnimation={selectCardAnimation} onPurchaseAnimation={buyCardAnimation} onSelectPlacement={selectPlacement} onPurchasePlacement={buyPlacement} onSelectFont={selectCardFont} onPurchaseFont={buyCardFont} onUpload={uploadCrowLogoFile} />
 
   return <main className="app-shell">
     {toast && <div className="toast">{toast}</div>}
@@ -408,7 +454,7 @@ function Lobby({ code, name, onRename, seats, timer, setTimer, winningScore, set
   </main>
 }
 
-function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentAnimation, purchasedAnimations, onBack, onSelect, onPurchase, onSelectAnimation, onPurchaseAnimation, onUpload }: { currentLogo: string | null; catalog: CrowLogoRecord[]; tokens: number; purchasedLogos: string[]; currentAnimation: string | null; purchasedAnimations: string[]; onBack: () => void; onSelect: (id: string) => void; onPurchase: (id: string) => void; onSelectAnimation: (id: string | null) => void; onPurchaseAnimation: (id: string) => void; onUpload: (file: File) => Promise<CrowLogoRecord> }) {
+function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentAnimation, purchasedAnimations, currentPlacement, purchasedPlacements, currentFont, purchasedFonts, onBack, onSelect, onPurchase, onSelectAnimation, onPurchaseAnimation, onSelectPlacement, onPurchasePlacement, onSelectFont, onPurchaseFont, onUpload }: { currentLogo: string | null; catalog: CrowLogoRecord[]; tokens: number; purchasedLogos: string[]; currentAnimation: string | null; purchasedAnimations: string[]; currentPlacement: string | null; purchasedPlacements: string[]; currentFont: string | null; purchasedFonts: string[]; onBack: () => void; onSelect: (id: string) => void; onPurchase: (id: string) => void; onSelectAnimation: (id: string | null) => void; onPurchaseAnimation: (id: string) => void; onSelectPlacement: (id: string | null) => void; onPurchasePlacement: (id: string) => void; onSelectFont: (id: string | null) => void; onPurchaseFont: (id: string) => void; onUpload: (file: File) => Promise<CrowLogoRecord> }) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
@@ -431,9 +477,9 @@ function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentA
   }
   return <main className="app-shell settings-shell">
     <header className="topbar"><button className="back-button" onClick={onBack}>← <span>Home</span></button><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div></header>
-    <section className="settings-header"><p className="eyebrow">The shop</p><h1>Spend your tokens.</h1><p className="settings-sub">Win games to earn tokens — even against AI — then spend them on crow faces and card frame animations. Your picks follow you to every table.</p><div className="token-balance">◆ {tokens} tokens</div></section>
+    <section className="settings-header"><p className="eyebrow">The shop</p><h1>Spend your tokens.</h1><p className="settings-sub">Win games to earn tokens — even against AI — then spend them on crow faces, card frame animations, and typefaces. Your picks follow you to every table.</p><div className="token-balance">◆ {tokens} tokens</div></section>
     <section className="panel settings-panel-lg">
-      <div className="crow-preview-row"><div className="playing-card crow-card logo-preview"><CrowLogo logoId={selected} catalog={catalog} /><small>Crow</small></div><p className="settings-sub">That’s the crow the whole table sees when you play it.</p></div>
+      <div className="crow-preview-row"><div className={`logo-preview-stack ${currentPlacement ? `crow-placement-${currentPlacement}` : ''}`} key={currentPlacement ?? 'none'}><div className={`playing-card crow-card logo-preview ${currentAnimation ? `card-anim-${currentAnimation}` : ''}`}><CrowLogo logoId={selected} catalog={catalog} /><small>Crow</small></div></div><p className="settings-sub">Everything equipped at once — your crow face, frame animation, and the entrance it makes when you play it.</p></div>
       <div className="crow-logo-grid">{options.map((option) => { const paid = isPaidCrowLogo(option.id); const owned = !paid || purchasedLogos.includes(option.id); return <button key={option.id} className={`crow-logo-option ${selected === option.id ? 'selected' : ''}`} onClick={() => (owned ? onSelect(option.id) : onPurchase(option.id))}><span className="crow-card-thumb"><CrowLogo logoId={option.id} catalog={catalog} /></span><span className="crow-logo-name">{option.name}</span><span className={`crow-logo-price ${owned ? 'owned' : 'unowned'}`}>{owned ? (selected === option.id ? 'Equipped' : 'Owned') : `${TOKENS_PER_CROW_FACE} tokens`}</span></button> })}</div>
       <div className="shop-section">
         <div className="shop-section-heading"><p className="eyebrow">Frame animations</p><h3>Make your cards move.</h3><p className="settings-sub">Each frame animation costs {COINS_PER_CARD_ANIMATION} tokens and animates every card in your hand.</p></div>
@@ -442,12 +488,26 @@ function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentA
           {CARD_ANIMATIONS.map((animation) => { const owned = purchasedAnimations.includes(animation.id); const equipped = currentAnimation === animation.id; return <button key={animation.id} className={`${equipped ? 'selected' : ''}`} onClick={() => (owned ? onSelectAnimation(animation.id) : onPurchaseAnimation(animation.id))} title={animation.description}><div className={`playing-card color-red card-anim-${animation.id} anim-preview`}><strong>7</strong><small>red</small></div><span className="crow-logo-name">{animation.name}</span><span className={`crow-logo-price ${owned ? 'owned' : 'unowned'}`}>{owned ? (equipped ? 'Equipped' : 'Owned') : `${COINS_PER_CARD_ANIMATION} tokens`}</span></button> })}
         </div>
       </div>
+      <div className="shop-section">
+        <div className="shop-section-heading"><p className="eyebrow">Crow placement</p><h3>Make an entrance.</h3><p className="settings-sub">When your crow card hits the table, it lands with its own signature effect. Hover an option to see it play. Each costs {COINS_PER_PLACEMENT} tokens.</p></div>
+        <div className="anim-grid">
+          <button key="none" className={`${currentPlacement === null ? 'selected' : ''}`} onClick={() => onSelectPlacement(null)}><div className="playing-card crow-card anim-preview"><CrowLogo logoId="classic" catalog={catalog} /><small>Crow</small></div><span className="crow-logo-name">None</span><span className="crow-logo-price owned">Free</span></button>
+          {PLACEMENTS.map((placement) => { const owned = purchasedPlacements.includes(placement.id); const equipped = currentPlacement === placement.id; return <button key={placement.id} className={`placement-option ${equipped ? 'selected' : ''}`} onClick={() => (owned ? onSelectPlacement(placement.id) : onPurchasePlacement(placement.id))} title={placement.description}><div className={`playing-card crow-card crow-placement-${placement.id} anim-preview`}><CrowLogo logoId="classic" catalog={catalog} /><small>Crow</small></div><span className="crow-logo-name">{placement.name}</span><span className={`crow-logo-price ${owned ? 'owned' : 'unowned'}`}>{owned ? (equipped ? 'Equipped' : 'Owned') : `${COINS_PER_PLACEMENT} tokens`}</span></button> })}
+        </div>
+      </div>
+      <div className="shop-section">
+        <div className="shop-section-heading"><p className="eyebrow">Card fonts</p><h3>Set the tone.</h3><p className="settings-sub">A typeface applies to every numbered card you play, in your hand and on the table. Each costs {COINS_PER_CARD_FONT} tokens.</p></div>
+        <div className="anim-grid">
+          <button key="none" className={`${currentFont === null ? 'selected' : ''}`} onClick={() => onSelectFont(null)}><div className="playing-card color-red anim-preview"><strong>14</strong><small>red</small></div><span className="crow-logo-name">None</span><span className="crow-logo-price owned">Free</span></button>
+          {CARD_FONTS.map((font) => { const owned = purchasedFonts.includes(font.id); const equipped = currentFont === font.id; return <button key={font.id} className={`${equipped ? 'selected' : ''}`} onClick={() => (owned ? onSelectFont(font.id) : onPurchaseFont(font.id))} title={font.description}><div className={`playing-card color-red card-font-${font.id} anim-preview`}><strong>14</strong><small>red</small></div><span className="crow-logo-name">{font.name}</span><span className={`crow-logo-price ${owned ? 'owned' : 'unowned'}`}>{owned ? (equipped ? 'Equipped' : 'Owned') : `${COINS_PER_CARD_FONT} tokens`}</span></button> })}
+        </div>
+      </div>
       <div className="upload-row"><button className="secondary-button" onClick={() => fileInput.current?.click()} disabled={uploading}>{uploading ? 'Uploading…' : 'Upload your own'}</button><input ref={fileInput} type="file" accept="image/*" hidden onChange={handleFile} />{uploadError && <p className="upload-error">{uploadError}</p>}<p className="small-help">Uploads are free and live in the shared crow-logos bucket, so anyone at the table can pick them. Keep it under 2 MB.</p></div>
     </section>
   </main>
 }
 
-function GameScreen({ game, sessionId, currentUserId, isHost, crowLogos, catalog, cardAnimation, onRematch, onCloseLobby, onBid, onTrump, onDiscard, onCard, onBack }: { game: SessionState; sessionId: string | null; currentUserId?: string; isHost: boolean; crowLogos: Record<string, string | null>; catalog: CrowLogoRecord[]; cardAnimation: string | null; onRematch: () => void; onCloseLobby: () => void; onBid: (amount: number | null) => void; onTrump: (color: CardColor) => void; onDiscard: (cardIds: string[]) => void; onCard: (cardId: string) => void; onBack: () => void }) {
+function GameScreen({ game, sessionId, currentUserId, isHost, crowLogos, catalog, cardAnimation, placements, cardFonts, onRematch, onCloseLobby, onBid, onTrump, onDiscard, onCard, onBack }: { game: SessionState; sessionId: string | null; currentUserId?: string; isHost: boolean; crowLogos: Record<string, string | null>; catalog: CrowLogoRecord[]; cardAnimation: string | null; placements: Record<string, string | null>; cardFonts: Record<string, string | null>; onRematch: () => void; onCloseLobby: () => void; onBid: (amount: number | null) => void; onTrump: (color: CardColor) => void; onDiscard: (cardIds: string[]) => void; onCard: (cardId: string) => void; onBack: () => void }) {
   const [selectedDiscard, setSelectedDiscard] = useState<string[]>([])
   const showShuffle = false
   const currentPlayer = game.players[game.hand?.currentPlayerIndex ?? 0]
@@ -486,9 +546,9 @@ function GameScreen({ game, sessionId, currentUserId, isHost, crowLogos, catalog
     <section className="game-header"><div><p className="eyebrow">Rieman Rules · Hand {game.handNumber + 1}</p><h1>{phaseTitle}</h1></div><div className="scoreboard"><div><span>{teamLabel('A', game, currentUserId)}</span><strong>{game.scores.A}</strong></div><div><span>{teamLabel('B', game, currentUserId)}</span><strong>{game.scores.B}</strong></div></div></section>
     {gameOver && <GameResult game={game} currentUserId={currentUserId} isHost={isHost} onRematch={onRematch} onCloseLobby={onCloseLobby} />}
     {!gameOver && game.hand?.phase === 'complete' && <div className={`result-banner ${game.hand.bidMade ? '' : 'failed-bid'}`}><strong>{game.hand.bidMade ? `${teamLabel(game.hand.bidderTeam ?? 'A', game, currentUserId)} made the bid` : `${teamLabel(game.hand.bidderTeam ?? 'A', game, currentUserId)} failed the bid`}</strong><span>Bid {game.hand.currentBid} · Captured {game.hand.teamPoints?.[game.hand.bidderTeam ?? 'A'] ?? 0} · Score {game.hand.scoreDelta?.[game.hand.bidderTeam ?? 'A'] ?? 0}</span></div>}
-    {!gameOver && <section className={`game-board ${tableStatus ? `table-${tableStatus}` : ''}`}><div className={`table-center ${game.hand?.trumpColor ? `table-trump-${game.hand.trumpColor}` : ''}`}><strong>{game.hand?.phase === 'bidding' ? game.hand.currentBid ?? 'No bid' : teamLabel(bidder?.team ?? 'A', game, currentUserId)}</strong>{game.hand?.phase !== 'bidding' && <small>{game.hand?.currentBid ?? '—'} points</small>}{game.hand?.bidderId && <div className="table-hand-points"><strong>{teamLabel('A', game, currentUserId)} {capturedPointsForTeam(game, 'A')}</strong><strong>{teamLabel('B', game, currentUserId)} {capturedPointsForTeam(game, 'B')}</strong></div>}</div>{showShuffle && <ShuffleAnimation />}<TableCards trick={tableTrick} players={game.players} visualPosition={visualPosition} biddingStatus={game.hand?.phase === 'bidding' ? `${currentPlayer?.name ?? 'Player'} is bidding` : undefined} crowLogos={crowLogos} catalog={catalog} />{game.players.map((player, index) => { const bid = latestBids.get(player.id); const position = visualPosition(index); return <div className={`player-position player-${position} ${player.id === currentPlayer?.id ? 'is-turn' : ''}`} key={player.id}><Avatar label={player.name} color={avatarColors[index]} />{player.id === dealer?.id && <span className="dealer-chip">Dealer</span>}<span>{player.name}{player.id === currentUserId ? ' · You' : ''}</span><small>{player.isAi ? 'AI' : ''}</small>{game.hand?.phase === 'bidding' && <span className={`table-bid-status ${player.id === currentPlayer?.id ? 'bidding-now' : ''}`}>{player.id === currentPlayer?.id && 'Bidding'}{player.id !== currentPlayer?.id && bid && (bid.passed ? 'Passed' : `Bid ${bid.amount}`)}{player.id !== currentPlayer?.id && !bid && 'Not bid'}</span>}</div> })}</section>}
+    {!gameOver && <section className={`game-board ${tableStatus ? `table-${tableStatus}` : ''}`}><div className={`table-center ${game.hand?.trumpColor ? `table-trump-${game.hand.trumpColor}` : ''}`}><strong>{game.hand?.phase === 'bidding' ? game.hand.currentBid ?? 'No bid' : teamLabel(bidder?.team ?? 'A', game, currentUserId)}</strong>{game.hand?.phase !== 'bidding' && <small>{game.hand?.currentBid ?? '—'} points</small>}{game.hand?.bidderId && <div className="table-hand-points"><strong>{teamLabel('A', game, currentUserId)} {capturedPointsForTeam(game, 'A')}</strong><strong>{teamLabel('B', game, currentUserId)} {capturedPointsForTeam(game, 'B')}</strong></div>}</div>{showShuffle && <ShuffleAnimation />}<TableCards trick={tableTrick} players={game.players} visualPosition={visualPosition} biddingStatus={game.hand?.phase === 'bidding' ? `${currentPlayer?.name ?? 'Player'} is bidding` : undefined} crowLogos={crowLogos} catalog={catalog} placements={placements} cardFonts={cardFonts} />{game.players.map((player, index) => { const bid = latestBids.get(player.id); const position = visualPosition(index); return <div className={`player-position player-${position} ${player.id === currentPlayer?.id ? 'is-turn' : ''}`} key={player.id}><Avatar label={player.name} color={avatarColors[index]} />{player.id === dealer?.id && <span className="dealer-chip">Dealer</span>}<span>{player.name}{player.id === currentUserId ? ' · You' : ''}</span><small>{player.isAi ? 'AI' : ''}</small>{game.hand?.phase === 'bidding' && <span className={`table-bid-status ${player.id === currentPlayer?.id ? 'bidding-now' : ''}`}>{player.id === currentPlayer?.id && 'Bidding'}{player.id !== currentPlayer?.id && bid && (bid.passed ? 'Passed' : `Bid ${bid.amount}`)}{player.id !== currentPlayer?.id && !bid && 'Not bid'}</span>}</div> })}</section>}
     {!gameOver && game.hand?.phase === 'trump' && <section className="action-panel"><p className="eyebrow">Trump selection</p><h2>{isBidder ? 'Which color will be trump?' : `${bidder?.name ?? 'The winning bidder'} is choosing trump`}</h2>{isBidder ? <div className="color-actions">{availableTrumpColors.map((color) => <button className={`color-choice color-${color}`} key={color} onClick={() => onTrump(color)}>{color}</button>)}</div> : <p className="muted-note">The winning bidder chooses a color they still hold.</p>}</section>}
-    {!gameOver && <section className="hand-panel"><div className="hand-cards">{sortHand(me?.hand ?? []).map((card) => <CardView key={card.id} card={card} selected={selectedDiscard.includes(card.id)} crowLogo={crowLogos[currentUserId ?? ''] ?? null} catalog={catalog} animation={cardAnimation} onClick={game.hand?.phase === 'kitty' && isBidder ? () => toggleDiscard(card) : game.hand?.phase === 'playing' && isMyTurn && legalCardIds.has(card.id) ? () => onCard(card.id) : undefined} />)}</div>{game.hand?.phase === 'bidding' && <div className="bid-controls"><button className="pass-button" disabled={!isMyTurn} onClick={() => onBid(null)}>Pass</button><div className="bid-options">{bidOptions.map((bid) => <button key={bid} disabled={!isMyTurn} onClick={() => onBid(bid)}>{bid}</button>)}</div></div>}{game.hand?.phase === 'kitty' && isBidder && <button className="button primary discard-button" disabled={selectedDiscard.length !== 5} onClick={() => { onDiscard(selectedDiscard); setSelectedDiscard([]) }}>Discard selected cards →</button>}</section>}
+    {!gameOver && <section className="hand-panel"><div className="hand-cards">{sortHand(me?.hand ?? []).map((card) => <CardView key={card.id} card={card} selected={selectedDiscard.includes(card.id)} crowLogo={crowLogos[currentUserId ?? ''] ?? null} catalog={catalog} animation={cardAnimation} font={cardFonts[currentUserId ?? ''] ?? null} onClick={game.hand?.phase === 'kitty' && isBidder ? () => toggleDiscard(card) : game.hand?.phase === 'playing' && isMyTurn && legalCardIds.has(card.id) ? () => onCard(card.id) : undefined} />)}</div>{game.hand?.phase === 'bidding' && <div className="bid-controls"><button className="pass-button" disabled={!isMyTurn} onClick={() => onBid(null)}>Pass</button><div className="bid-options">{bidOptions.map((bid) => <button key={bid} disabled={!isMyTurn} onClick={() => onBid(bid)}>{bid}</button>)}</div></div>}{game.hand?.phase === 'kitty' && isBidder && <button className="button primary discard-button" disabled={selectedDiscard.length !== 5} onClick={() => { onDiscard(selectedDiscard); setSelectedDiscard([]) }}>Discard selected cards →</button>}</section>}
     {!gameOver && (game.hand?.phase === 'playing' || game.hand?.phase === 'complete') && <TrickPanel trick={lastTrick} players={game.players} completed crowLogos={crowLogos} catalog={catalog} />}
     {!gameOver && game.hand?.phase === 'complete' && <section className="next-hand-panel"><div><p className="eyebrow">Hand complete</p><h2>Scores: {teamLabel('A', game, currentUserId)} {game.scores.A} · {teamLabel('B', game, currentUserId)} {game.scores.B}</h2></div><p className="muted-note">Dealing the next hand…</p></section>}
     <div className="game-note"><span className="rules-icon">R</span><p>{sessionId ? 'Game state is saved and synchronized with everyone at the table.' : 'Connecting this table to the active session…'}</p></div>
@@ -506,10 +566,10 @@ function GameResult({ game, currentUserId, isHost, onRematch, onCloseLobby }: { 
   return <section className={`game-result ${won ? 'game-won' : 'game-lost'}`}>{won && <div className="confetti" aria-hidden>{confetti.map((piece) => <i key={piece.id} style={{ left: piece.left, animationDelay: piece.delay, background: piece.color, transform: `rotate(${piece.rotation})` }} />)}</div>}<div className="result-icon">{won ? '★' : '○'}</div><p className="eyebrow">Game complete</p><h2>{teamLabel(game.hand?.gameWinner ?? 'A', game, currentUserId)} wins</h2><p>{won ? `You took the table and earned +${tokensForWinningScore(game.winningScore)} tokens.` : 'The cards had other plans this time.'}</p>{isHost ? <div className="result-actions"><button className="button primary" onClick={onRematch}>Rematch →</button><button className="secondary-button" onClick={onCloseLobby}>Close lobby</button></div> : <p className="muted-note">Waiting for the table leader to choose a rematch or close the lobby.</p>}</section>
 }
 
-function TableCards({ trick, players, visualPosition, completed = Boolean(trick?.cards.length === 4), biddingStatus, crowLogos, catalog }: { trick?: { cards: Array<{ playerId: string; card: Card }>; winnerId?: string }; players: SessionState['players']; visualPosition: (index: number) => number; completed?: boolean; biddingStatus?: string; crowLogos: Record<string, string | null>; catalog: CrowLogoRecord[] }) {
+function TableCards({ trick, players, visualPosition, completed = Boolean(trick?.cards.length === 4), biddingStatus, crowLogos, catalog, placements, cardFonts }: { trick?: { cards: Array<{ playerId: string; card: Card }>; winnerId?: string }; players: SessionState['players']; visualPosition: (index: number) => number; completed?: boolean; biddingStatus?: string; crowLogos: Record<string, string | null>; catalog: CrowLogoRecord[]; placements: Record<string, string | null>; cardFonts: Record<string, string | null> }) {
   if (!trick?.cards.length) return <div className="table-empty">{biddingStatus ?? 'Cards played this trick will appear here.'}</div>
   const winnerIndex = players.findIndex((player) => player.id === trick.cards.find((played) => played.playerId === trick.winnerId)?.playerId)
-  return <div className={`table-cards ${completed ? 'trick-capture' : ''}`}>{trick.cards.map(({ playerId, card }) => { const playerIndex = visualPosition(players.findIndex((player) => player.id === playerId)); return <div className={`table-card-play table-card-position-${playerIndex} capture-target-${visualPosition(winnerIndex)}`} key={`${playerId}-${card.id}`}><CardView card={card} crowLogo={crowLogos[playerId] ?? null} catalog={catalog} /></div> })}</div>
+  return <div className={`table-cards ${completed ? 'trick-capture' : ''}`}>{trick.cards.map(({ playerId, card }) => { const playerIndex = visualPosition(players.findIndex((player) => player.id === playerId)); return <div className={`table-card-play table-card-position-${playerIndex} capture-target-${visualPosition(winnerIndex)}`} key={`${playerId}-${card.id}`}><CardView card={card} crowLogo={crowLogos[playerId] ?? null} catalog={catalog} placement={placements[playerId] ?? null} font={cardFonts[playerId] ?? null} /></div> })}</div>
 }
 
 function ShuffleAnimation() { return null }
@@ -522,6 +582,60 @@ function BidHistory({ game, currentPlayerId }: { game: SessionState; currentPlay
 }
 
 function CrowGlyph({ variant }: { variant: string }) {
+  if (variant === 'fox') return (
+    <svg className="crow-logo-svg" viewBox="0 0 48 48" aria-hidden focusable="false">
+      <g fill="#fff">
+        <path d="M15 20 L12.5 5.5 L21 12.5 Z" />
+        <path d="M33 20 L35.5 5.5 L27 12.5 Z" />
+        <path d="M24 12 C32.5 12 36.5 18.5 35.5 26.5 C34.5 35 29.5 41.5 24 41.5 C18.5 41.5 13.5 35 12.5 26.5 C11.5 18.5 15.5 12 24 12 Z" />
+        <path d="M24 25.5 L20.5 34 L27.5 34 Z" opacity="0.85" />
+      </g>
+      <circle cx="20.5" cy="22.5" r="1.7" fill="#ec7765" />
+      <circle cx="29.5" cy="22.5" r="1.7" fill="#ec7765" />
+    </svg>
+  )
+  if (variant === 'owl') return (
+    <svg className="crow-logo-svg" viewBox="0 0 48 48" aria-hidden focusable="false">
+      <g fill="#fff">
+        <path d="M16.5 14 L14.5 4 L20.5 10.5 Z" />
+        <path d="M31.5 14 L33.5 4 L27.5 10.5 Z" />
+        <path d="M24 11 C33 11 38 19 38 27.5 C38 36.5 31.5 42 24 42 C16.5 42 10 36.5 10 27.5 C10 19 15 11 24 11 Z" />
+      </g>
+      <circle cx="18.5" cy="27" r="2.7" fill="#ec7765" />
+      <circle cx="29.5" cy="27" r="2.7" fill="#ec7765" />
+    </svg>
+  )
+  if (variant === 'cat') return (
+    <svg className="crow-logo-svg" viewBox="0 0 48 48" aria-hidden focusable="false">
+      <g fill="#fff">
+        <path d="M16.5 19 L13 3.5 L21.5 12 Z" />
+        <path d="M31.5 19 L35 3.5 L26.5 12 Z" />
+        <path d="M24 13 C32 13 36.5 19.5 35.5 27.5 C34.5 36 29.5 42 24 42 C18.5 42 13.5 36 12.5 27.5 C11.5 19.5 16 13 24 13 Z" />
+      </g>
+      <circle cx="20.5" cy="23.5" r="1.7" fill="#ec7765" />
+      <circle cx="29.5" cy="23.5" r="1.7" fill="#ec7765" />
+      <g stroke="#fff" stroke-width="1.1" stroke-linecap="round" fill="none">
+        <path d="M13.5 30 L6.5 28.5" />
+        <path d="M13.5 33 L6.5 33.5" />
+        <path d="M34.5 30 L41.5 28.5" />
+        <path d="M34.5 33 L41.5 33.5" />
+      </g>
+    </svg>
+  )
+  if (variant === 'panda') return (
+    <svg className="crow-logo-svg" viewBox="0 0 48 48" aria-hidden focusable="false">
+      <g fill="#fff">
+        <path d="M24 16 C32 16 36.5 22.5 36 30.5 C35.5 38.5 30 42 24 42 C18 42 12.5 38.5 12 30.5 C11.5 22.5 16 16 24 16 Z" />
+      </g>
+      <circle cx="14" cy="16" r="4.6" fill="#333a40" />
+      <circle cx="34" cy="16" r="4.6" fill="#333a40" />
+      <ellipse cx="19" cy="27" rx="3.2" ry="4.2" fill="#333a40" />
+      <ellipse cx="29" cy="27" rx="3.2" ry="4.2" fill="#333a40" />
+      <circle cx="19.5" cy="26.5" r="1.1" fill="#fff" />
+      <circle cx="29.5" cy="26.5" r="1.1" fill="#fff" />
+      <ellipse cx="24" cy="35" rx="2.6" ry="2" fill="#333a40" />
+    </svg>
+  )
   return (
     <svg className="crow-logo-svg" viewBox="0 0 48 48" aria-hidden focusable="false">
       <g fill="#fff">
@@ -548,10 +662,12 @@ function CrowLogo({ logoId, catalog }: { logoId?: string | null; catalog: CrowLo
   return <strong>C</strong>
 }
 
-function CardView({ card, selected, onClick, crowLogo, catalog, animation }: { card: Card; selected?: boolean; onClick?: () => void; crowLogo?: string | null; catalog?: CrowLogoRecord[]; animation?: string | null }) {
+function CardView({ card, selected, onClick, crowLogo, catalog, animation, placement, font }: { card: Card; selected?: boolean; onClick?: () => void; crowLogo?: string | null; catalog?: CrowLogoRecord[]; animation?: string | null; placement?: string | null; font?: string | null }) {
   const frame = animation ? `card-anim-${animation}` : ''
-  if (card.kind === 'crow') return <div className={`playing-card crow-card ${selected ? 'selected' : ''} ${onClick ? 'playable' : ''} ${frame}`} onClick={onClick}><CrowLogo logoId={crowLogo} catalog={catalog ?? []} /><small>Crow</small></div>
-  return <div className={`playing-card color-${card.color} ${selected ? 'selected' : ''} ${onClick ? 'playable' : ''} ${frame}`} onClick={onClick}><strong>{card.value}</strong><small>{card.color}</small></div>
+  const place = card.kind === 'crow' && placement ? `crow-placement-${placement}` : ''
+  const typeface = font ? `card-font-${font}` : ''
+  if (card.kind === 'crow') return <div className={`playing-card crow-card ${selected ? 'selected' : ''} ${onClick ? 'playable' : ''} ${frame} ${place}`} onClick={onClick}><CrowLogo logoId={crowLogo} catalog={catalog ?? []} /><small>Crow</small></div>
+  return <div className={`playing-card color-${card.color} ${selected ? 'selected' : ''} ${onClick ? 'playable' : ''} ${frame} ${typeface}`} onClick={onClick}><strong>{card.value}</strong><small>{card.color}</small></div>
 }
 
 function sortHand(hand: Card[]) {
