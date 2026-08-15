@@ -45,6 +45,15 @@ type PlayerStatistics = {
   winning_bids: number
   favorite_colors: Record<string, number>
   favorite_partners: Record<string, number>
+  ai_games_won: number
+  ai_games_lost: number
+  ai_games_unfinished: number
+  ai_games_completed: number
+  ai_hands_played: number
+  ai_hands_bid: number
+  ai_winning_bids: number
+  ai_favorite_colors: Record<string, number>
+  ai_favorite_partners: Record<string, number>
 }
 
 function App() {
@@ -582,6 +591,10 @@ function App() {
     setView('lobby')
   }
 
+  const totalGamesWon = playerStats ? (playerStats.games_won ?? 0) + (playerStats.ai_games_won ?? 0) : null
+  const totalGamesCompleted = playerStats ? (playerStats.games_completed ?? 0) + (playerStats.ai_games_completed ?? 0) : null
+  const totalHandsPlayed = playerStats ? (playerStats.hands_played ?? 0) + (playerStats.ai_hands_played ?? 0) : null
+
   if (authLoading) return <div className="auth-loading">Loading your table…</div>
   if (isSupabaseConfigured && !session) return <AuthScreen />
 
@@ -593,7 +606,7 @@ function App() {
     {toast && <div className="toast">{toast}</div>}
     <header className="topbar"><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className={`status-dot ${isSupabaseConfigured ? 'online' : ''}`} /> {isSupabaseConfigured ? 'Connected' : 'Demo mode'} <span className="profile-email">{displayName || (session?.user ? 'Player' : name)}</span>{wallet && <span className="token-chip">◆ {wallet.tokens}</span>}<button className="settings-button" onClick={openSettings}>Shop</button><button className="sign-out-button" onClick={signOut}>Sign out</button></div></header>
     <section className="hero"><div className="hero-copy"><p className="eyebrow">A better seat at the table</p><h1>Bring your people.<br /><em>Deal the cards.</em></h1><p className="hero-text">A cozy place for family games, friendly rivalries, and one more hand before bed.</p><div className="hero-actions"><label className="join-field create-name-field"><span>Name your table</span><input value={lobbyName} onChange={(e) => setLobbyName(e.target.value)} placeholder="Or we’ll pick one for you" maxLength={40} /></label><button className="button primary" onClick={startLobby}>Create a private table <span>→</span></button><label className="join-field"><span>Have a code?</span><input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())} placeholder="CROW-XXXX" /><button onClick={() => joinCode ? enterLobby() : showToast('Enter a table code first.')}>Join</button></label></div></div><div className="hero-art"><div className="sun" /><div className="card card-back"><div className="card-pattern">C</div></div><div className="card card-front"><span className="card-corner">14<br /><i>red</i></span><span className="card-number">14</span><span className="card-corner bottom">14<br /><i>red</i></span></div><span className="sparkle one">✦</span><span className="sparkle two">✦</span></div></section>
-    <section className="content-grid"><div className="panel welcome-panel"><div className="panel-heading"><div><p className="eyebrow">Your tables</p><h2>{myLobbies.length ? 'Back to the game' : 'Ready when you are'}</h2></div><span className="pill">{myLobbies.length ? 'Live' : 'New'}</span></div>{myLobbies.length > 0 ? <div className="lobby-list">{myLobbies.map((lobby) => <div className="lobby-row" key={lobby.id}><div className="lobby-row-mark">C</div><div className="lobby-row-info"><strong>{lobby.name}</strong><span>{lobby.status === 'in_progress' ? 'Game in progress' : 'Waiting for players'} · {lobby.join_code}{lobby.host_id === session?.user?.id ? ' · Host' : ''}</span></div><div className="lobby-row-actions"><button className="lobby-rejoin" onClick={() => rejoinLobby(lobby)}>{lobby.status === 'in_progress' ? 'Resume' : 'Rejoin'} <span>→</span></button><button className="lobby-leave" onClick={() => leaveLobbyFor(lobby)}>Leave</button></div></div>)}</div> : <div className="empty-table"><div className="mini-cards"><span>14</span><span>10</span><span>R</span></div><p>Create a private table and invite<br />your family with a simple code.</p><button className="text-button" onClick={startLobby}>Start a new table <span>→</span></button></div>}</div><div className="panel stats-panel"><div className="panel-heading"><div><p className="eyebrow">Your record</p><h2>At a glance</h2></div><button className="icon-button" onClick={() => setShowStats(true)} aria-label="Show all stats">↗</button></div><div className="stat-grid"><div><strong>{playerStats?.games_won ?? '—'}</strong><span>Games won</span></div><div><strong>{playerStats && playerStats.games_completed ? `${Math.round((playerStats.games_won / playerStats.games_completed) * 100)}%` : '—'}</strong><span>Win rate</span></div><div><strong>{playerStats?.hands_played ?? '—'}</strong><span>Hands played</span></div></div><p className="muted-note">Stats count completed player-only games.</p></div></section>
+    <section className="content-grid"><div className="panel welcome-panel"><div className="panel-heading"><div><p className="eyebrow">Your tables</p><h2>{myLobbies.length ? 'Back to the game' : 'Ready when you are'}</h2></div><span className="pill">{myLobbies.length ? 'Live' : 'New'}</span></div>{myLobbies.length > 0 ? <div className="lobby-list">{myLobbies.map((lobby) => <div className="lobby-row" key={lobby.id}><div className="lobby-row-mark">C</div><div className="lobby-row-info"><strong>{lobby.name}</strong><span>{lobby.status === 'in_progress' ? 'Game in progress' : 'Waiting for players'} · {lobby.join_code}{lobby.host_id === session?.user?.id ? ' · Host' : ''}</span></div><div className="lobby-row-actions"><button className="lobby-rejoin" onClick={() => rejoinLobby(lobby)}>{lobby.status === 'in_progress' ? 'Resume' : 'Rejoin'} <span>→</span></button><button className="lobby-leave" onClick={() => leaveLobbyFor(lobby)}>Leave</button></div></div>)}</div> : <div className="empty-table"><div className="mini-cards"><span>14</span><span>10</span><span>R</span></div><p>Create a private table and invite<br />your family with a simple code.</p><button className="text-button" onClick={startLobby}>Start a new table <span>→</span></button></div>}</div><div className="panel stats-panel"><div className="panel-heading"><div><p className="eyebrow">Your record</p><h2>At a glance</h2></div><button className="icon-button" onClick={() => setShowStats(true)} aria-label="Show all stats">↗</button></div><p className="muted-note stats-note-top">Stats count completed games — player-only and AI are tracked separately.</p><div className="stat-grid"><div><strong>{totalGamesWon ?? '—'}</strong><span>Games won</span></div><div><strong>{totalGamesWon !== null && totalGamesCompleted ? `${Math.round((totalGamesWon / totalGamesCompleted) * 100)}%` : '—'}</strong><span>Win rate</span></div><div><strong>{totalHandsPlayed ?? '—'}</strong><span>Hands played</span></div></div></div></section>
     <footer><span>Rieman family table · Built for the long haul</span><span>Rieman Rules · 4 players</span></footer>
     {showStats && <StatsModal stats={playerStats} onClose={() => setShowStats(false)} />}
   </main>
@@ -677,26 +690,37 @@ function RulesModal({ name, onClose }: { name: string; onClose: () => void }) {
 }
 
 function StatsModal({ stats, onClose }: { stats: PlayerStatistics | null; onClose: () => void }) {
-  const winRate = stats && stats.games_completed ? Math.round((stats.games_won / stats.games_completed) * 100) : 0
-  const bidRate = stats && stats.hands_bid ? Math.round((stats.winning_bids / stats.hands_bid) * 100) : 0
-  const colors = Object.entries(stats?.favorite_colors ?? {}).sort((a, b) => b[1] - a[1])
-  const maxColor = colors.length ? Math.max(...colors.map(([, count]) => count)) : 0
   const colorLabel: Record<string, string> = { black: 'Black', red: 'Red', yellow: 'Yellow', green: 'Green' }
-  return <div className="modal-backdrop" onClick={onClose}><div className="modal-card rules-modal-card stats-modal-card" onClick={(event) => event.stopPropagation()}>
-    <div className="rules-modal-heading"><span className="rules-icon">S</span><div><p className="eyebrow">Your record</p><h3>All your stats</h3></div><button className="rules-modal-close" onClick={onClose} aria-label="Close stats">×</button></div>
-    {stats ? <><div className="stat-grid stats-grid">
-      <div><strong>{stats.games_won}</strong><span>Games won</span></div>
-      <div><strong>{stats.games_lost}</strong><span>Games lost</span></div>
+  const renderGrid = (source: { games_won: number; games_lost: number; games_unfinished: number; games_completed: number; hands_played: number; hands_bid: number; winning_bids: number; favorite_colors: Record<string, number> }) => {
+    const winRate = source.games_completed ? Math.round((source.games_won / source.games_completed) * 100) : 0
+    const bidRate = source.hands_bid ? Math.round((source.winning_bids / source.hands_bid) * 100) : 0
+    const colors = Object.entries(source.favorite_colors ?? {}).sort((a, b) => b[1] - a[1])
+    const maxColor = colors.length ? Math.max(...colors.map(([, count]) => count)) : 0
+    return <><div className="stat-grid stats-grid">
+      <div><strong>{source.games_won}</strong><span>Games won</span></div>
+      <div><strong>{source.games_lost}</strong><span>Games lost</span></div>
       <div><strong>{winRate}%</strong><span>Win rate</span></div>
-      <div><strong>{stats.games_completed}</strong><span>Games completed</span></div>
-      <div><strong>{stats.games_unfinished}</strong><span>Games unfinished</span></div>
-      <div><strong>{stats.hands_played}</strong><span>Hands played</span></div>
-      <div><strong>{stats.hands_bid}</strong><span>Hands bid</span></div>
-      <div><strong>{stats.winning_bids}</strong><span>Winning bids</span></div>
+      <div><strong>{source.games_completed}</strong><span>Games completed</span></div>
+      <div><strong>{source.games_unfinished}</strong><span>Games unfinished</span></div>
+      <div><strong>{source.hands_played}</strong><span>Hands played</span></div>
+      <div><strong>{source.hands_bid}</strong><span>Hands bid</span></div>
+      <div><strong>{source.winning_bids}</strong><span>Winning bids</span></div>
       <div><strong>{bidRate}%</strong><span>Bid success</span></div>
     </div>
-    {colors.length > 0 && <div className="favorites"><p className="eyebrow">Favorite trump</p>{colors.map(([color, count]) => <div className="favorite-row" key={color}><span>{colorLabel[color] ?? color}</span><div className="favorite-bar"><i className={`favorite-fill-${color}`} style={{ width: `${maxColor ? (count / maxColor) * 100 : 0}%` }} /></div><strong>{count}</strong></div>)}</div>}
-    <p className="muted-note">Stats count completed player-only games.</p></> : <p className="stats-empty">Play your first game to start your record.</p>}
+    {colors.length > 0 && <div className="favorites"><p className="eyebrow">Favorite trump</p>{colors.map(([color, count]) => <div className="favorite-row" key={color}><span>{colorLabel[color] ?? color}</span><div className="favorite-bar"><i className={`favorite-fill-${color}`} style={{ width: `${maxColor ? (count / maxColor) * 100 : 0}%` }} /></div><strong>{count}</strong></div>)}</div>}</>
+  }
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal-card rules-modal-card stats-modal-card" onClick={(event) => event.stopPropagation()}>
+    <div className="rules-modal-heading"><span className="rules-icon">S</span><div><p className="eyebrow">Your record</p><h3>All your stats</h3></div><button className="rules-modal-close" onClick={onClose} aria-label="Close stats">×</button></div>
+    {stats ? <><p className="muted-note stats-note-top">Stats count completed games — player-only and AI are tracked separately.</p>
+      <div className="stats-section">
+        <p className="stats-section-label">Versus players</p>
+        {renderGrid(stats)}
+      </div>
+      <div className="stats-section">
+        <p className="stats-section-label">Versus AI</p>
+        {renderGrid({ games_won: stats.ai_games_won, games_lost: stats.ai_games_lost, games_unfinished: stats.ai_games_unfinished, games_completed: stats.ai_games_completed, hands_played: stats.ai_hands_played, hands_bid: stats.ai_hands_bid, winning_bids: stats.ai_winning_bids, favorite_colors: stats.ai_favorite_colors })}
+      </div>
+    </> : <p className="stats-empty">Play your first game to start your record.</p>}
     <div className="modal-actions"><button className="button primary" onClick={onClose}>Done</button></div>
   </div></div>
 }
