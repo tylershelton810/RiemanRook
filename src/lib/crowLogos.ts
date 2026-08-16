@@ -9,6 +9,9 @@ export const BUILTIN_CROW_LOGOS = [
   { id: 'owl', name: 'Owl' },
   { id: 'cat', name: 'Cat' },
   { id: 'panda', name: 'Panda' },
+  { id: 'cosmic', name: 'Cosmic' },
+  { id: 'holo', name: 'Hologram' },
+  { id: 'ember', name: 'Ember' },
 ] as const
 
 export type BuiltinCrowLogoId = typeof BUILTIN_CROW_LOGOS[number]['id']

@@ -142,3 +142,51 @@ export async function getPlayerStatistics(userId: string) {
   if (error) throw error
   return data
 }
+
+export type LeaderboardEntry = {
+  userId: string
+  name: string
+  stats: {
+    gamesWon: number
+    gamesCompleted: number
+    handsPlayed: number
+    handsBid: number
+    winningBids: number
+  }
+  ai: {
+    gamesWon: number
+    gamesCompleted: number
+    handsPlayed: number
+    handsBid: number
+    winningBids: number
+  }
+}
+
+export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
+  if (!supabase) throw new Error('Supabase is not configured.')
+  const { data, error } = await supabase
+    .from('player_statistics')
+    .select('user_id, games_won, games_completed, hands_played, hands_bid, winning_bids, ai_games_won, ai_games_completed, ai_hands_played, ai_hands_bid, ai_winning_bids, profile:profiles(display_name, stats_public)')
+  if (error) throw error
+  return (data ?? [])
+    .map((row) => ({ row, profile: Array.isArray(row.profile) ? row.profile[0] : row.profile }))
+    .filter(({ profile }) => profile?.stats_public !== false)
+    .map(({ row, profile }) => ({
+      userId: row.user_id,
+      name: profile?.display_name?.trim() || 'Player',
+      stats: {
+        gamesWon: row.games_won ?? 0,
+        gamesCompleted: row.games_completed ?? 0,
+        handsPlayed: row.hands_played ?? 0,
+        handsBid: row.hands_bid ?? 0,
+        winningBids: row.winning_bids ?? 0,
+      },
+      ai: {
+        gamesWon: row.ai_games_won ?? 0,
+        gamesCompleted: row.ai_games_completed ?? 0,
+        handsPlayed: row.ai_hands_played ?? 0,
+        handsBid: row.ai_hands_bid ?? 0,
+        winningBids: row.ai_winning_bids ?? 0,
+      },
+    }))
+}

@@ -11,11 +11,12 @@ import { purchaseCardAnimation, setCardAnimation } from './services/cardAnimatio
 import { purchasePlacement, setPlacement } from './services/placements'
 import { purchaseCardFont, setCardFont } from './services/cardFonts'
 import { BUILTIN_CROW_LOGOS } from './lib/crowLogos'
-import { TOKENS_PER_CROW_FACE, isPaidCrowLogo, tokensForWinningScore } from './lib/tokens'
+import { crowFacePrice, isPaidCrowLogo, tokensForWinningScore } from './lib/tokens'
 import { CARD_ANIMATIONS, COINS_PER_CARD_ANIMATION } from './lib/cardAnimations'
 import { PLACEMENTS, COINS_PER_PLACEMENT } from './lib/placements'
-import { CARD_FONTS, COINS_PER_CARD_FONT } from './lib/cardFonts'
-import { closeLobby, dealNextHand, getActiveGameSession, getCurrentGameSession, getPlayerStatistics, persistLocalGame, reconcileAiSeats, rematchSession, startGameSession, submitBid, submitTrump, submitDiscard, submitCard } from './services/sessions'
+import { CARD_FONTS, COINS_PER_CARD_FONT, cardFontPrice } from './lib/cardFonts'
+import { closeLobby, dealNextHand, getActiveGameSession, getCurrentGameSession, getLeaderboard, getPlayerStatistics, persistLocalGame, reconcileAiSeats, rematchSession, startGameSession, submitBid, submitTrump, submitDiscard, submitCard } from './services/sessions'
+import type { LeaderboardEntry } from './services/sessions'
 import { createConfetti } from './game/celebration'
 import type { Card, PlayerState, SessionState } from './game/types'
 import type { CardColor } from './game/types'
@@ -61,6 +62,8 @@ function App() {
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured)
   const [playerStats, setPlayerStats] = useState<PlayerStatistics | null>(null)
   const [showStats, setShowStats] = useState(false)
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null)
+  const [showLeaderboard, setShowLeaderboard] = useState(false)
   const [view, setView] = useState<'home' | 'lobby' | 'game' | 'settings'>('home')
   const [activeGame, setActiveGame] = useState<SessionState | null>(null)
   const [activeGameSessionId, setActiveGameSessionId] = useState<string | null>(null)
@@ -244,6 +247,11 @@ function App() {
   useEffect(() => {
     if (!session?.user) return
     getPlayerStatistics(session.user.id).then(setPlayerStats).catch(() => undefined)
+  }, [session, view])
+
+  useEffect(() => {
+    if (!session?.user || view !== 'home') return
+    getLeaderboard().then(setLeaderboard).catch(() => undefined)
   }, [session, view])
 
   useEffect(() => {
@@ -594,6 +602,13 @@ function App() {
   const totalGamesWon = playerStats ? (playerStats.games_won ?? 0) + (playerStats.ai_games_won ?? 0) : null
   const totalGamesCompleted = playerStats ? (playerStats.games_completed ?? 0) + (playerStats.ai_games_completed ?? 0) : null
   const totalHandsPlayed = playerStats ? (playerStats.hands_played ?? 0) + (playerStats.ai_hands_played ?? 0) : null
+  const leaderboardTop = useMemo(() => {
+    if (!leaderboard?.length) return []
+    return [...leaderboard]
+      .map((entry) => ({ entry, value: entry.stats.gamesWon + entry.ai.gamesWon }))
+      .sort((a, b) => b.value - a.value || a.entry.name.localeCompare(b.entry.name))
+      .slice(0, 3)
+  }, [leaderboard])
 
   if (authLoading) return <div className="auth-loading">Loading your table…</div>
   if (isSupabaseConfigured && !session) return <AuthScreen />
@@ -606,9 +621,11 @@ function App() {
     {toast && <div className="toast">{toast}</div>}
     <header className="topbar"><div className="brand"><span className="brand-mark">C</span><span>The Crow Game</span></div><div className="connection"><span className={`status-dot ${isSupabaseConfigured ? 'online' : ''}`} /> {isSupabaseConfigured ? 'Connected' : 'Demo mode'} <span className="profile-email">{displayName || (session?.user ? 'Player' : name)}</span>{wallet && <span className="token-chip">◆ {wallet.tokens}</span>}<button className="settings-button" onClick={openSettings}>Shop</button><button className="sign-out-button" onClick={signOut}>Sign out</button></div></header>
     <section className="hero"><div className="hero-copy"><p className="eyebrow">A better seat at the table</p><h1>Bring your people.<br /><em>Deal the cards.</em></h1><p className="hero-text">A cozy place for family games, friendly rivalries, and one more hand before bed.</p><div className="hero-actions"><label className="join-field create-name-field"><span>Name your table</span><input value={lobbyName} onChange={(e) => setLobbyName(e.target.value)} placeholder="Or we’ll pick one for you" maxLength={40} /></label><button className="button primary" onClick={startLobby}>Create a private table <span>→</span></button><label className="join-field"><span>Have a code?</span><input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())} placeholder="CROW-XXXX" /><button onClick={() => joinCode ? enterLobby() : showToast('Enter a table code first.')}>Join</button></label></div></div><div className="hero-art"><div className="sun" /><div className="card card-back"><div className="card-pattern">C</div></div><div className="card card-front"><span className="card-corner">14<br /><i>red</i></span><span className="card-number">14</span><span className="card-corner bottom">14<br /><i>red</i></span></div><span className="sparkle one">✦</span><span className="sparkle two">✦</span></div></section>
-    <section className="content-grid"><div className="panel welcome-panel"><div className="panel-heading"><div><p className="eyebrow">Your tables</p><h2>{myLobbies.length ? 'Back to the game' : 'Ready when you are'}</h2></div><span className="pill">{myLobbies.length ? 'Live' : 'New'}</span></div>{myLobbies.length > 0 ? <div className="lobby-list">{myLobbies.map((lobby) => <div className="lobby-row" key={lobby.id}><div className="lobby-row-mark">C</div><div className="lobby-row-info"><strong>{lobby.name}</strong><span>{lobby.status === 'in_progress' ? 'Game in progress' : 'Waiting for players'} · {lobby.join_code}{lobby.host_id === session?.user?.id ? ' · Host' : ''}</span></div><div className="lobby-row-actions"><button className="lobby-rejoin" onClick={() => rejoinLobby(lobby)}>{lobby.status === 'in_progress' ? 'Resume' : 'Rejoin'} <span>→</span></button><button className="lobby-leave" onClick={() => leaveLobbyFor(lobby)}>Leave</button></div></div>)}</div> : <div className="empty-table"><div className="mini-cards"><span>14</span><span>10</span><span>R</span></div><p>Create a private table and invite<br />your family with a simple code.</p><button className="text-button" onClick={startLobby}>Start a new table <span>→</span></button></div>}</div><div className="panel stats-panel"><div className="panel-heading"><div><p className="eyebrow">Your record</p><h2>At a glance</h2></div><button className="icon-button" onClick={() => setShowStats(true)} aria-label="Show all stats">↗</button></div><div className="stat-grid"><div><strong>{totalGamesWon ?? '—'}</strong><span>Games won</span></div><div><strong>{totalGamesWon !== null && totalGamesCompleted ? `${Math.round((totalGamesWon / totalGamesCompleted) * 100)}%` : '—'}</strong><span>Win rate</span></div><div><strong>{totalHandsPlayed ?? '—'}</strong><span>Hands played</span></div></div></div></section>
+    <section className="content-grid"><div className="panel welcome-panel"><div className="panel-heading"><div><p className="eyebrow">Your tables</p><h2>{myLobbies.length ? 'Back to the game' : 'Ready when you are'}</h2></div><span className="pill">{myLobbies.length ? 'Live' : 'New'}</span></div>{myLobbies.length > 0 ? <div className="lobby-list">{myLobbies.map((lobby) => <div className="lobby-row" key={lobby.id}><div className="lobby-row-mark">C</div><div className="lobby-row-info"><strong>{lobby.name}</strong><span>{lobby.status === 'in_progress' ? 'Game in progress' : 'Waiting for players'} · {lobby.join_code}{lobby.host_id === session?.user?.id ? ' · Host' : ''}</span></div><div className="lobby-row-actions"><button className="lobby-rejoin" onClick={() => rejoinLobby(lobby)}>{lobby.status === 'in_progress' ? 'Resume' : 'Rejoin'} <span>→</span></button><button className="lobby-leave" onClick={() => leaveLobbyFor(lobby)}>Leave</button></div></div>)}</div> : <div className="empty-table"><div className="mini-cards"><span>14</span><span>10</span><span>R</span></div><p>Create a private table and invite<br />your family with a simple code.</p><button className="text-button" onClick={startLobby}>Start a new table <span>→</span></button></div>}</div><div className="panel stats-panel"><div className="panel-heading"><div><p className="eyebrow">Your record</p><h2>At a glance</h2></div><button className="icon-button" onClick={() => setShowStats(true)} aria-label="Show all stats">↗</button></div><div className="stat-grid"><div><strong>{totalGamesWon ?? '—'}</strong><span>Games won</span></div><div><strong>{totalGamesWon !== null && totalGamesCompleted ? `${Math.round((totalGamesWon / totalGamesCompleted) * 100)}%` : '—'}</strong><span>Win rate</span></div><div><strong>{totalHandsPlayed ?? '—'}</strong><span>Hands played</span></div></div></div>    </section>
+    <section className="panel leaderboard-panel"><div className="panel-heading"><div><p className="eyebrow">Bragging rights</p><h2>Leaderboard</h2></div><button className="icon-button" onClick={() => setShowLeaderboard(true)} aria-label="Show the leaderboard">↗</button></div>{leaderboardTop.length > 0 ? <div className="leaderboard-preview">{leaderboardTop.map(({ entry, value }, index) => <div className={`leaderboard-row ${entry.userId === session?.user?.id ? 'me' : ''}`} key={entry.userId}><span className="leaderboard-rank">{index + 1}</span><Avatar label={entry.name} color={avatarColors[index % avatarColors.length]} /><span className="leaderboard-name">{entry.name}{entry.userId === session?.user?.id ? ' · You' : ''}</span><strong className="leaderboard-value">{value} <small>wins</small></strong></div>)}<button className="text-button leaderboard-see-all" onClick={() => setShowLeaderboard(true)}>See the full leaderboard <span>→</span></button></div> : <div className="empty-table"><p>{session?.user ? 'No games yet — the first win puts you on the board.' : 'Sign in to see who’s winning.'}</p><button className="text-button" onClick={() => setShowLeaderboard(true)}>See the leaderboard <span>→</span></button></div>}</section>
     <footer><span>Rieman family table · Built for the long haul</span><span>Rieman Rules · 4 players</span></footer>
     {showStats && <StatsModal stats={playerStats} onClose={() => setShowStats(false)} />}
+    {showLeaderboard && <LeaderboardModal entries={leaderboard} currentUserId={session?.user.id} onClose={() => setShowLeaderboard(false)} />}
   </main>
 }
 
@@ -724,6 +741,66 @@ function StatsModal({ stats, onClose }: { stats: PlayerStatistics | null; onClos
   </div></div>
 }
 
+type LeaderboardScope = 'all' | 'players' | 'ai'
+type LeaderboardStatKey = 'gamesWon' | 'winRate' | 'handsPlayed' | 'winningBids' | 'bidSuccess'
+
+const LEADERBOARD_STATS: { key: LeaderboardStatKey; label: string; format: (value: number) => string }[] = [
+  { key: 'gamesWon', label: 'Games won', format: (value) => `${value}` },
+  { key: 'winRate', label: 'Win rate', format: (value) => `${Math.round(value)}%` },
+  { key: 'handsPlayed', label: 'Hands played', format: (value) => `${value}` },
+  { key: 'winningBids', label: 'Winning bids', format: (value) => `${value}` },
+  { key: 'bidSuccess', label: 'Bid success', format: (value) => `${Math.round(value)}%` },
+]
+
+function scopeNumbers(entry: LeaderboardEntry, scope: LeaderboardScope) {
+  if (scope === 'players') return entry.stats
+  if (scope === 'ai') return entry.ai
+  return {
+    gamesWon: entry.stats.gamesWon + entry.ai.gamesWon,
+    gamesCompleted: entry.stats.gamesCompleted + entry.ai.gamesCompleted,
+    handsPlayed: entry.stats.handsPlayed + entry.ai.handsPlayed,
+    handsBid: entry.stats.handsBid + entry.ai.handsBid,
+    winningBids: entry.stats.winningBids + entry.ai.winningBids,
+  }
+}
+
+function scoreFor(stat: LeaderboardStatKey, numbers: { gamesWon: number; gamesCompleted: number; handsPlayed: number; handsBid: number; winningBids: number }): number {
+  switch (stat) {
+    case 'gamesWon': return numbers.gamesWon
+    case 'winRate': return numbers.gamesCompleted >= 3 ? (numbers.gamesWon / numbers.gamesCompleted) * 100 : -1
+    case 'handsPlayed': return numbers.handsPlayed
+    case 'winningBids': return numbers.winningBids
+    case 'bidSuccess': return numbers.handsBid >= 3 ? (numbers.winningBids / numbers.handsBid) * 100 : -1
+  }
+}
+
+function LeaderboardModal({ entries, currentUserId, onClose }: { entries: LeaderboardEntry[] | null; currentUserId?: string; onClose: () => void }) {
+  const [scope, setScope] = useState<LeaderboardScope>('all')
+  const scopes: { id: LeaderboardScope; label: string }[] = [
+    { id: 'all', label: 'All games' },
+    { id: 'players', label: 'Versus players' },
+    { id: 'ai', label: 'Versus AI' },
+  ]
+  const ranked = useMemo(() => {
+    const result = {} as Record<LeaderboardStatKey, { userId: string; name: string; value: number }[]>
+    if (!entries?.length) return result
+    for (const stat of LEADERBOARD_STATS) {
+      result[stat.key] = entries
+        .map((entry) => ({ userId: entry.userId, name: entry.name, value: scoreFor(stat.key, scopeNumbers(entry, scope)) }))
+        .filter((row) => row.value >= 0)
+        .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+        .slice(0, 5)
+    }
+    return result
+  }, [entries, scope])
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal-card rules-modal-card stats-modal-card leaderboard-modal-card" onClick={(event) => event.stopPropagation()}>
+    <div className="rules-modal-heading"><span className="rules-icon">T</span><div><p className="eyebrow">Bragging rights</p><h3>The leaderboard</h3></div><button className="rules-modal-close" onClick={onClose} aria-label="Close leaderboard">×</button></div>
+    <div className="leaderboard-tabs">{scopes.map(({ id, label }) => <button key={id} className={`${scope === id ? 'active' : ''}`} onClick={() => setScope(id)}>{label}</button>)}</div>
+    {entries && entries.length > 0 ? <div className="leaderboard-scope">{LEADERBOARD_STATS.map((stat) => <div className="leaderboard-stat" key={stat.key}><p className="leaderboard-stat-title">{stat.label}</p>{ranked[stat.key]?.length ? ranked[stat.key].map((row, index) => <div className={`leaderboard-row ${row.userId === currentUserId ? 'me' : ''}`} key={row.userId}><span className="leaderboard-rank">{index + 1}</span><Avatar label={row.name} color={avatarColors[index % avatarColors.length]} /><span className="leaderboard-name">{row.name}{row.userId === currentUserId ? ' · You' : ''}</span><strong className="leaderboard-value">{stat.format(row.value)}</strong></div>) : <p className="leaderboard-empty">No games in this category yet.</p>}</div>)}</div> : <p className="stats-empty">Win your first game to get on the board.</p>}
+    <div className="modal-actions"><button className="button primary" onClick={onClose}>Done</button></div>
+  </div></div>
+}
+
 function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentAnimation, purchasedAnimations, currentPlacement, purchasedPlacements, currentFont, purchasedFonts, onBack, onSelect, onPurchase, onSelectAnimation, onPurchaseAnimation, onSelectPlacement, onPurchasePlacement, onSelectFont, onPurchaseFont, displayName, onChangeDisplayName }: { currentLogo: string | null; catalog: CrowLogoRecord[]; tokens: number; purchasedLogos: string[]; currentAnimation: string | null; purchasedAnimations: string[]; currentPlacement: string | null; purchasedPlacements: string[]; currentFont: string | null; purchasedFonts: string[]; onBack: () => void; onSelect: (id: string) => void; onPurchase: (id: string) => void; onSelectAnimation: (id: string | null) => void; onPurchaseAnimation: (id: string) => void; onSelectPlacement: (id: string | null) => void; onPurchasePlacement: (id: string) => void; onSelectFont: (id: string | null) => void; onPurchaseFont: (id: string) => void; displayName: string; onChangeDisplayName: (name: string) => void }) {
   const [confirm, setConfirm] = useState<{ title: string; description: string; priceLabel: string; canReplay: boolean; preview: ReactNode; onConfirm: () => void } | null>(null)
   const [nameDraft, setNameDraft] = useState(displayName)
@@ -739,8 +816,8 @@ function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentA
         <label className="join-field create-name-field"><span>Display name</span><input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} maxLength={40} placeholder="Give yourself a name" /></label>
         <button className="button primary" disabled={nameBusy || nameDraft.trim() === displayName} onClick={() => { setNameBusy(true); onChangeDisplayName(nameDraft) }}>{nameBusy ? 'Saving…' : 'Save name'}</button>
       </div>
-      <div className="crow-preview-row"><div className={`logo-preview-stack ${currentPlacement ? `crow-placement-${currentPlacement}` : ''}`} key={currentPlacement ?? 'none'}><div className={`playing-card crow-card logo-preview ${currentAnimation ? `card-anim-${currentAnimation}` : ''}`}><CrowLogo logoId={selected} catalog={catalog} /><small>Crow</small></div></div><p className="settings-sub">Everything equipped at once — your crow face, frame animation, and the entrance it makes when you play it.</p></div>
-      <div className="crow-logo-grid">{options.map((option) => { const paid = isPaidCrowLogo(option.id); const owned = !paid || purchasedLogos.includes(option.id); return <button key={option.id} className={`crow-logo-option ${selected === option.id ? 'selected' : ''}`} onClick={() => (owned ? onSelect(option.id) : setConfirm({ title: option.name, description: 'A custom crow face for your rook card.', priceLabel: `${TOKENS_PER_CROW_FACE} tokens`, canReplay: false, preview: <div className="playing-card crow-card logo-preview"><CrowLogo logoId={option.id} catalog={catalog} /><small>Crow</small></div>, onConfirm: () => onPurchase(option.id) }))}><span className="crow-card-thumb"><CrowLogo logoId={option.id} catalog={catalog} /></span><span className="crow-logo-name">{option.name}</span><span className={`crow-logo-price ${owned ? 'owned' : 'unowned'}`}>{owned ? (selected === option.id ? 'Equipped' : 'Owned') : `${TOKENS_PER_CROW_FACE} tokens`}</span></button> })}</div>
+      <div className="crow-preview-row"><div className={`logo-preview-stack ${currentPlacement ? `crow-placement-${currentPlacement}` : ''}`} key={currentPlacement ?? 'none'}><div className={`playing-card crow-card logo-preview ${crowFaceClass(selected)} ${currentAnimation ? `card-anim-${currentAnimation}` : ''}`}><CrowLogo logoId={selected} catalog={catalog} /><small>Crow</small></div></div><p className="settings-sub">Everything equipped at once — your crow face, frame animation, and the entrance it makes when you play it.</p></div>
+      <div className="crow-logo-grid">{options.map((option) => { const paid = isPaidCrowLogo(option.id); const owned = !paid || purchasedLogos.includes(option.id); return <button key={option.id} className={`crow-logo-option ${selected === option.id ? 'selected' : ''}`} onClick={() => (owned ? onSelect(option.id) : setConfirm({ title: option.name, description: 'A custom crow face for your rook card.', priceLabel: `${crowFacePrice(option.id)} tokens`, canReplay: false, preview: <div className={`playing-card crow-card logo-preview ${crowFaceClass(option.id)}`}><CrowLogo logoId={option.id} catalog={catalog} /><small>Crow</small></div>, onConfirm: () => onPurchase(option.id) }))}><span className={`crow-card-thumb ${crowFaceClass(option.id)}`}><CrowLogo logoId={option.id} catalog={catalog} /></span><span className="crow-logo-name">{option.name}</span><span className={`crow-logo-price ${owned ? 'owned' : 'unowned'}`}>{owned ? (selected === option.id ? 'Equipped' : 'Owned') : `${crowFacePrice(option.id)} tokens`}</span></button> })}</div>
       <div className="shop-section">
         <div className="shop-section-heading"><p className="eyebrow">Frame animations</p><h3>Make your rook move.</h3><p className="settings-sub">Each frame animation costs {COINS_PER_CARD_ANIMATION} tokens and animates your rook card in your hand.</p></div>
         <div className="anim-grid">
@@ -756,10 +833,10 @@ function SettingsScreen({ currentLogo, catalog, tokens, purchasedLogos, currentA
         </div>
       </div>
       <div className="shop-section">
-        <div className="shop-section-heading"><p className="eyebrow">Card fonts</p><h3>Set the tone.</h3><p className="settings-sub">A typeface applies to every numbered card you play, in your hand and on the table. Each costs {COINS_PER_CARD_FONT} tokens.</p></div>
+        <div className="shop-section-heading"><p className="eyebrow">Card fonts</p><h3>Set the tone.</h3><p className="settings-sub">A typeface applies to every numbered card you play, in your hand and on the table. Liquid and Aurora are premium at 25 tokens; the classic typefaces cost {COINS_PER_CARD_FONT}.</p></div>
         <div className="anim-grid">
           <button key="none" className={`${currentFont === null ? 'selected' : ''}`} onClick={() => onSelectFont(null)}><div className="playing-card color-red anim-preview"><strong>14</strong><small>red</small></div><span className="crow-logo-name">None</span><span className="crow-logo-price owned">Free</span></button>
-          {CARD_FONTS.map((font) => { const owned = purchasedFonts.includes(font.id); const equipped = currentFont === font.id; return <button key={font.id} className={`${equipped ? 'selected' : ''}`} onClick={() => (owned ? onSelectFont(font.id) : setConfirm({ title: font.name, description: font.description, priceLabel: `${COINS_PER_CARD_FONT} tokens`, canReplay: false, preview: <div className={`playing-card color-red card-font-${font.id} anim-preview`}><strong>14</strong><small>red</small></div>, onConfirm: () => onPurchaseFont(font.id) }))} title={font.description}><div className={`playing-card color-red card-font-${font.id} anim-preview`}><strong>14</strong><small>red</small></div><span className="crow-logo-name">{font.name}</span><span className={`crow-logo-price ${owned ? 'owned' : 'unowned'}`}>{owned ? (equipped ? 'Equipped' : 'Owned') : `${COINS_PER_CARD_FONT} tokens`}</span></button> })}
+          {CARD_FONTS.map((font) => { const owned = purchasedFonts.includes(font.id); const equipped = currentFont === font.id; const fontPreview = <div className="font-preview-row">{(['black', 'red', 'yellow', 'green'] as const).map((color) => <div key={color} className={`playing-card color-${color} card-font-${font.id} anim-preview`}><strong>14</strong><small>{color}</small></div>)}</div>; return <button key={font.id} className={`${equipped ? 'selected' : ''}`} onClick={() => (owned ? onSelectFont(font.id) : setConfirm({ title: font.name, description: font.description, priceLabel: `${cardFontPrice(font.id)} tokens`, canReplay: false, preview: fontPreview, onConfirm: () => onPurchaseFont(font.id) }))} title={font.description}><div className={`playing-card color-red card-font-${font.id} anim-preview`}><strong>14</strong><small>red</small></div><span className="crow-logo-name">{font.name}</span><span className={`crow-logo-price ${owned ? 'owned' : 'unowned'}`}>{owned ? (equipped ? 'Equipped' : 'Owned') : `${cardFontPrice(font.id)} tokens`}</span></button> })}
         </div>
       </div>
     </section>
@@ -847,6 +924,12 @@ function BidHistory({ game, currentPlayerId }: { game: SessionState; currentPlay
   return <section className="bid-history"><div className="history-heading"><div><p className="eyebrow">Bidding</p><h2>Current bid: {game.hand?.currentBid ?? '—'}</h2></div><span>{passedPlayers.size} passed · {game.players.length - passedPlayers.size} eligible</span></div><div className="bid-players">{game.players.map((player, index) => { const latest = [...bids].reverse().find((bid) => bid.playerId === player.id); return <div className={`bid-player ${player.id === currentPlayerId ? 'active' : ''}`} key={player.id}><Avatar label={player.name} color={avatarColors[index]} /><div><strong>{player.name}{player.id === currentPlayerId ? ' · Up now' : ''}</strong><small>{latest ? latest.passed ? 'Passed — out this hand' : `Bid ${latest.amount}` : 'Not bid yet'}</small></div></div> })}</div></section>
 }
 
+const ANIMATED_CROW_FACES = ['cosmic', 'holo', 'ember']
+function crowFaceClass(logoId?: string | null) {
+  const id = logoId ?? 'classic'
+  return ANIMATED_CROW_FACES.includes(id) ? `crow-face-${id}` : ''
+}
+
 function CrowGlyph({ variant }: { variant: string }) {
   if (variant === 'fox') return (
     <svg className="crow-logo-svg" viewBox="0 0 48 48" aria-hidden focusable="false">
@@ -915,6 +998,8 @@ function CrowGlyph({ variant }: { variant: string }) {
       {variant === 'cool' && <g><rect x="22.5" y="14.5" width="4.5" height="1.6" rx="0.8" fill="#283238" /><rect x="27" y="14" width="5" height="5" rx="1.6" fill="#283238" /><rect x="34" y="14" width="5" height="5" rx="1.6" fill="#283238" /><rect x="32" y="15.5" width="2" height="2" rx="0.6" fill="#283238" /></g>}
       {variant === 'crown' && <g><path d="M23 13.5 L26 7.5 L31 11 L35 7.5 L38 13.5 Z" fill="#f0b84f" /><circle cx="31" cy="10" r="1.3" fill="#ec7765" /><rect x="25" y="13.5" width="11" height="1.6" rx="0.8" fill="#e0b95e" /></g>}
       {variant === 'chef' && <g><ellipse cx="31" cy="7.5" rx="7.5" ry="5.4" fill="#f8e7c4" /><rect x="24.5" y="11" width="13" height="3.6" rx="1.4" fill="#f8e7c4" /><rect x="24.5" y="14" width="13" height="2.2" rx="0.9" fill="#e0b95e" /></g>}
+      {variant === 'cosmic' && <g><path d="M8 5 L9.7 9.7 L14.4 11.4 L9.7 13.1 L8 17.8 L6.3 13.1 L1.6 11.4 L6.3 9.7 Z" fill="#ffe98a" /><circle cx="42" cy="24" r="1.1" fill="#bfe9ff" /></g>}
+      {variant === 'ember' && <g><path d="M31 5.5 C28.7 9.4 29.5 12 31 13.6 C32.5 12 33.3 9.4 31 5.5 Z" fill="#f0b84f" /><path d="M31 6.8 C30.1 9.6 30.7 11.3 31 11.9 C31.3 11.3 31.9 9.6 31 6.8 Z" fill="#ffe98a" /></g>}
     </svg>
   )
 }
@@ -932,7 +1017,7 @@ function CardView({ card, selected, onClick, crowLogo, catalog, animation, place
   const frame = card.kind === 'crow' && animation ? `card-anim-${animation}` : ''
   const place = card.kind === 'crow' && placement ? `crow-placement-${placement}` : ''
   const typeface = font ? `card-font-${font}` : ''
-  if (card.kind === 'crow') return <div className={`playing-card crow-card ${selected ? 'selected' : ''} ${onClick ? 'playable' : ''} ${frame} ${place}`} onClick={onClick}><CrowLogo logoId={crowLogo} catalog={catalog ?? []} /><small>Crow</small></div>
+  if (card.kind === 'crow') return <div className={`playing-card crow-card ${crowFaceClass(crowLogo)} ${selected ? 'selected' : ''} ${onClick ? 'playable' : ''} ${frame} ${place}`} onClick={onClick}><CrowLogo logoId={crowLogo} catalog={catalog ?? []} /><small>Crow</small></div>
   return <div className={`playing-card color-${card.color} ${selected ? 'selected' : ''} ${onClick ? 'playable' : ''} ${typeface}`} onClick={onClick}><strong>{card.value}</strong><small>{card.color}</small></div>
 }
 
