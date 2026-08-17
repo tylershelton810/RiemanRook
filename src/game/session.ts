@@ -5,7 +5,7 @@ import type { Difficulty } from '../lib/types'
 
 export function createSession(id: string, players: PlayerState[], dealerIndex = 0, winningScore = 500): SessionState {
   if (players.length !== 4) throw new Error('A Crow session requires four players.')
-  return { id, status: 'active', players, scores: { A: 0, B: 0 }, handNumber: 0, winningScore, stats: Object.fromEntries(players.map((player) => [player.id, emptyPlayerStats()])), hand: startHand(players, dealerIndex) }
+  return { id, status: 'active', players, scores: { A: 0, B: 0 }, handNumber: 0, winningScore, stats: Object.fromEntries(players.map((player) => [player.id, emptyPlayerStats()])), rulesetId: 'rieman-rules', hand: startHand(players, dealerIndex) }
 }
 
 const AI_NAMES = ['Pip', 'Moss', 'Scout', 'Clover']
@@ -109,14 +109,14 @@ export function playCard(session: SessionState, playerId: string, cardId: string
   if (trick.cards.length === 4 && session.players.every((candidate) => candidate.hand.length === 0)) {
     session.hand.phase = 'complete'
     session.hand.completed = true
-    const teamPoints: Record<Team, number> = { A: capturedPointsForTeam(session, 'A'), B: capturedPointsForTeam(session, 'B') }
+    const teamPoints: Record<string, number> = { A: capturedPointsForTeam(session, 'A'), B: capturedPointsForTeam(session, 'B') }
     session.hand.teamPoints = teamPoints
     const bidderTeam = session.players.find((player) => player.id === session.hand?.bidderId)?.team
     if (!bidderTeam) throw new Error('Winning bid team not found.')
     const otherTeam: Team = bidderTeam === 'A' ? 'B' : 'A'
     const bid = session.hand.currentBid ?? 65
     const madeBid = teamPoints[bidderTeam] >= bid
-    const scoreDelta: Record<Team, number> = bidderTeam === 'A'
+    const scoreDelta: Record<string, number> = bidderTeam === 'A'
       ? { A: madeBid ? teamPoints.A : -bid, B: teamPoints.B }
       : { A: teamPoints.A, B: madeBid ? teamPoints.B : -bid }
     session.scores.A += scoreDelta.A

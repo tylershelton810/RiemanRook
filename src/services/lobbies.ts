@@ -1,11 +1,11 @@
-import type { Difficulty, LobbySeat } from '../lib/types'
+import type { Difficulty, LobbySeat, SeatTeam } from '../lib/types'
 import { supabase } from '../lib/supabase'
 
 export interface LobbyMemberRow {
   lobby_id: string
   user_id: string
   seat_index: number
-  team: 'A' | 'B'
+  team: SeatTeam
   is_host: boolean
   connected_at: string
   profile?: { display_name: string; crow_logo?: string | null } | { display_name: string; crow_logo?: string | null }[] | null
@@ -52,6 +52,15 @@ function generateJoinCode() {
   return `CROW-${suffix}`
 }
 
+function seatCountForRuleset(ruleset: string) {
+  return ruleset === 'rieman-rules-5' ? 5 : 4
+}
+
+function teamForIndex(index: number, seatCount: number): SeatTeam {
+  if (seatCount === 5) return 'ABCDE'[index] as SeatTeam
+  return index % 2 === 0 ? 'A' : 'B'
+}
+
 export async function ensureProfile(userId: string, email?: string, displayName?: string) {
   const client = requireClient()
   const { error } = await client.from('profiles').upsert({ id: userId, display_name: displayName?.trim() || email?.split('@')[0] || 'Player' }, { onConflict: 'id', ignoreDuplicates: true })
@@ -74,15 +83,13 @@ export async function setDisplayName(userId: string, displayName: string): Promi
   return trimmed
 }
 
-export async function createLobby(userId: string, name?: string) {
+export async function createLobby(userId: string, name?: string, ruleset: string = 'rieman-rules') {
   const client = requireClient()
-  const initialSeats: LobbySeat[] = [
-    { id: userId, name: 'You', status: 'human', team: 'A' },
-    { id: 'seat-1', name: 'Open seat', status: 'open', team: 'B' },
-    { id: 'seat-2', name: 'Open seat', status: 'open', team: 'A' },
-    { id: 'seat-3', name: 'Open seat', status: 'open', team: 'B' },
-  ]
-  const { data: lobby, error } = await client.from('lobbies').insert({ join_code: generateJoinCode(), host_id: userId, name: name?.trim() || generateLobbyName(), seats: initialSeats, settings: { ruleset: 'rieman-rules', turnTimer: 30, winningScore: 500 } }).select('id, join_code, host_id, name, status, settings').single()
+  const seatCount = seatCountForRuleset(ruleset)
+  const initialSeats: LobbySeat[] = Array.from({ length: seatCount }, (_, index) => index === 0
+    ? { id: userId, name: 'You', status: 'human', team: 'A' }
+    : { id: `seat-${index}`, name: 'Open seat', status: 'open', team: teamForIndex(index, seatCount) })
+  const { data: lobby, error } = await client.from('lobbies').insert({ join_code: generateJoinCode(), host_id: userId, name: name?.trim() || generateLobbyName(), seats: initialSeats, settings: { ruleset, turnTimer: 30, winningScore: 500 } }).select('id, join_code, host_id, name, status, settings').single()
   if (error) throw error
   const { error: memberError } = await client.from('lobby_players').insert({ lobby_id: lobby.id, user_id: userId, seat_index: 0, team: 'A', is_host: true })
   if (memberError) throw memberError
@@ -91,7 +98,10 @@ export async function createLobby(userId: string, name?: string) {
 
 export async function updateLobbySettings(lobbyId: string, hostId: string, settings: { turnTimer: number; winningScore: number }) {
   const client = requireClient()
-  const { data, error } = await client.from('lobbies').update({ settings }).eq('id', lobbyId).eq('host_id', hostId).select('settings').single()
+  const { data: lobby, error: readError } = await client.from('lobbies').select('settings').eq('id', lobbyId).eq('host_id', hostId).single()
+  if (readError) throw readError
+  const current = (lobby?.settings ?? {}) as { ruleset?: string; turnTimer?: number; winningScore?: number }
+  const { data, error } = await client.from('lobbies').update({ settings: { ...current, ...settings } }).eq('id', lobbyId).eq('host_id', hostId).select('settings').single()
   if (error) throw error
   return data.settings as { turnTimer: number; winningScore: number }
 }
@@ -156,13 +166,16 @@ export async function getLobbyMemberFonts(lobbyId: string) {
 }
 
 export async function joinLobby(lobbyId: string, userId: string) {
+  const client = requireClient()
   const members = await getLobbyMembers(lobbyId)
   if (members.some((member) => member.user_id === userId)) return members
+  const { data: lobby, error: lobbyError } = await client.from('lobbies').select('settings').eq('id', lobbyId).single()
+  if (lobbyError) throw lobbyError
+  const seatCount = seatCountForRuleset(lobby?.settings?.ruleset ?? 'rieman-rules')
   const usedSeats = new Set(members.map((member) => member.seat_index))
-  const seatIndex = [1, 2, 3].find((index) => !usedSeats.has(index))
+  const seatIndex = Array.from({ length: seatCount - 1 }, (_, index) => index + 1).find((index) => !usedSeats.has(index))
   if (seatIndex === undefined) throw new Error('This lobby is full.')
-  const client = requireClient()
-  const { error } = await client.from('lobby_players').insert({ lobby_id: lobbyId, user_id: userId, seat_index: seatIndex, team: seatIndex % 2 === 0 ? 'A' : 'B' })
+  const { error } = await client.from('lobby_players').insert({ lobby_id: lobbyId, user_id: userId, seat_index: seatIndex, team: teamForIndex(seatIndex, seatCount) })
   if (error) throw error
   return getLobbyMembers(lobbyId)
 }
@@ -170,11 +183,12 @@ export async function joinLobby(lobbyId: string, userId: string) {
 async function loadLobbySeats(lobbyId: string) {
   const client = requireClient()
   const [{ data: lobby, error: lobbyError }, members] = await Promise.all([
-    client.from('lobbies').select('seats').eq('id', lobbyId).single(),
+    client.from('lobbies').select('seats, settings').eq('id', lobbyId).single(),
     getLobbyMembers(lobbyId),
   ])
   if (lobbyError) throw lobbyError
-  const seats = membersToSeats(members)
+  const seatCount = seatCountForRuleset(lobby?.settings?.ruleset ?? 'rieman-rules')
+  const seats = membersToSeats(members, seatCount)
   const storedSeats = (lobby?.seats ?? []) as LobbySeat[]
   storedSeats.forEach((seat) => {
     if (seat.status === 'ai') seats[Number(seat.id.replace('seat-', ''))] = seat
@@ -207,17 +221,17 @@ export async function swapSeats(lobbyId: string, hostId: string, firstId: string
   const firstIndex = seats.findIndex((seat) => seat.id === firstId)
   const secondIndex = seats.findIndex((seat) => seat.id === secondId)
   if (firstIndex === -1 || secondIndex === -1) throw new Error('That seat is no longer available.')
-  const teamForIndex = (index: number): 'A' | 'B' => index % 2 === 0 ? 'A' : 'B'
+  const teamForSeatIndex = (index: number) => teamForIndex(index, seats.length)
   const swapped = seats.map((seat, index) => {
-    if (index === firstIndex) return { ...seats[secondIndex], team: teamForIndex(firstIndex) }
-    if (index === secondIndex) return { ...seats[firstIndex], team: teamForIndex(secondIndex) }
+    if (index === firstIndex) return { ...seats[secondIndex], team: teamForSeatIndex(firstIndex) }
+    if (index === secondIndex) return { ...seats[firstIndex], team: teamForSeatIndex(secondIndex) }
     return seat
   })
   await persistSeatModel(lobbyId, hostId, swapped)
   return loadLobbySeats(lobbyId)
 }
 
-export async function setSeatTeam(lobbyId: string, hostId: string, seatId: string, team: 'A' | 'B') {
+export async function setSeatTeam(lobbyId: string, hostId: string, seatId: string, team: SeatTeam) {
   const seats = await loadLobbySeats(lobbyId)
   const index = seats.findIndex((seat) => seat.id === seatId)
   if (index === -1) throw new Error('That seat is no longer available.')
@@ -264,10 +278,10 @@ export async function leaveLobby(lobbyId: string, userId: string) {
 export async function syncAiSeatsFromPlayers(lobbyId: string, hostId: string, players: Array<{ id: string; name: string; team: string; isAi: boolean }>) {
   const client = requireClient()
   const members = await getLobbyMembers(lobbyId)
-  const seats = membersToSeats(members)
+  const seats = membersToSeats(members, players.length)
   players.forEach((player, seatIndex) => {
     if (player.isAi && seatIndex < seats.length) {
-      seats[seatIndex] = { id: player.id, name: player.name, status: 'ai', team: player.team as 'A' | 'B', difficulty: 'Average' }
+      seats[seatIndex] = { id: player.id, name: player.name, status: 'ai', team: player.team as SeatTeam, difficulty: 'Average' }
     }
   })
   const { error } = await client.from('lobbies').update({ seats }).eq('id', lobbyId).eq('host_id', hostId)
@@ -281,7 +295,7 @@ export async function addAiSeat(lobbyId: string, hostId: string, seatId: string)
   const seats = [...((lobby.seats ?? []) as LobbySeat[])]
   const seatIndex = seats.findIndex((seat) => seat.id === seatId)
   if (seatIndex === -1) throw new Error('That seat is no longer available.')
-  const aiNames = ['Pip', 'Moss', 'Scout', 'Clover']
+  const aiNames = ['Pip', 'Moss', 'Scout', 'Clover', 'Fern']
   const usedNames = new Set(seats.filter((seat) => seat.status === 'ai').map((seat) => seat.name))
   const aiName = aiNames.find((name) => !usedNames.has(name)) ?? `Crow AI ${usedNames.size + 1}`
   seats[seatIndex] = { ...seats[seatIndex], name: aiName, status: 'ai', difficulty: 'Average' }
@@ -303,8 +317,8 @@ export async function setAiSeatDifficulty(lobbyId: string, hostId: string, seatI
   return seats
 }
 
-export function membersToSeats(members: LobbyMemberRow[]): LobbySeat[] {
-  const seats: LobbySeat[] = Array.from({ length: 4 }, (_, seatIndex) => ({ id: `seat-${seatIndex}`, name: 'Open seat', status: 'open', team: seatIndex % 2 === 0 ? 'A' : 'B' }))
+export function membersToSeats(members: LobbyMemberRow[], seatCount = 4): LobbySeat[] {
+  const seats: LobbySeat[] = Array.from({ length: seatCount }, (_, seatIndex) => ({ id: `seat-${seatIndex}`, name: 'Open seat', status: 'open', team: teamForIndex(seatIndex, seatCount) }))
   members.forEach((member) => {
     const profile = Array.isArray(member.profile) ? member.profile[0] : member.profile
     seats[member.seat_index] = { id: member.user_id, name: profile?.display_name ?? 'Player', status: 'human', team: member.team }

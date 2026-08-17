@@ -1,4 +1,5 @@
-import { riemanRules } from '../rules/riemanRules'
+import { riemanRules, isLegalBid as isLegalBidForRuleset } from '../rules/riemanRules'
+import type { RiemanRuleset } from '../rules/riemanRules'
 import type { Card, CardColor, Team, Trick } from './types'
 
 export function leadColorForTrick(trick: Trick | undefined, trumpColor?: CardColor) {
@@ -7,9 +8,8 @@ export function leadColorForTrick(trick: Trick | undefined, trumpColor?: CardCol
   return leadCard.kind === 'crow' ? trumpColor : leadCard.color
 }
 
-export function isLegalBid(amount: number, currentBid: number | null) {
-  const minimum = currentBid === null ? riemanRules.bidding.minimum : currentBid + riemanRules.bidding.increment
-  return amount >= minimum && amount <= riemanRules.bidding.maximum && amount % riemanRules.bidding.increment === 0
+export function isLegalBid(amount: number, currentBid: number | null, ruleset: RiemanRuleset = riemanRules) {
+  return isLegalBidForRuleset(amount, currentBid, ruleset)
 }
 
 export function canPlayCard(hand: Card[], card: Card, leadColor?: CardColor, trumpColor?: CardColor) {

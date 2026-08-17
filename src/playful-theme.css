@@ -24,7 +24,7 @@ input, button, select { font-size: 16px; }
 @media (max-width: 800px) { .connection .sign-out-button { display: inline-block; font-size: 9px; margin-left: 6px; } .connection .profile-email { display: none; } }
 .brand-mark { width: 34px; height: 34px; background: var(--coral); color: #fff; border-radius: 11px 11px 11px 3px; transform: rotate(-6deg); font-family: 'DM Mono', monospace; }
 .connection { color: #819094; }
-.hero { min-height: 500px; }
+.hero { min-height: 500px; padding-bottom: 44px; }
 .eyebrow { color: var(--green); letter-spacing: .1em; }
 .hero h1, .lobby-header h1, .panel-heading h2 { font-family: 'Fraunces', 'Playfair Display', serif; letter-spacing: -.04em; }
 .hero h1 { font-size: clamp(48px, 6vw, 76px); }
@@ -480,15 +480,19 @@ footer { color: #91a09f; }
 .favorite-row { display: grid; grid-template-columns: 76px 1fr 26px; align-items: center; gap: 12px; margin-top: 9px; }
 .favorite-row span { font: 11px 'DM Mono'; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .favorite-row strong { font: 700 12px 'DM Mono'; color: var(--green); text-align: right; }
+.favorite-row-partner { grid-template-columns: minmax(110px, 1.4fr) 1fr 26px; }
+.favorite-row-partner span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: none; letter-spacing: 0; }
 .favorite-bar { height: 7px; border-radius: 4px; background: #e9f1ee; overflow: hidden; }
 .favorite-bar i { display: block; height: 100%; border-radius: 4px; background: var(--green); }
 .favorite-bar .favorite-fill-black { background: #9eafb5; }
 .favorite-bar .favorite-fill-red { background: #e98a7a; }
 .favorite-bar .favorite-fill-yellow { background: #e0b95e; }
 .favorite-bar .favorite-fill-green { background: #8bbfae; }
+.favorite-bar .favorite-fill-partner { background: #7c9ec4; }
 .stats-empty { padding: 30px 0 12px; text-align: center; color: var(--muted); font-size: 13px; }
 .stats-section + .stats-section { margin-top: 26px; padding-top: 22px; border-top: 1px solid #e1eae7; }
 .stats-section-label { margin: 0 0 4px; font: 700 12px 'DM Mono'; text-transform: uppercase; letter-spacing: .08em; color: var(--green); }
+.stats-variant-label { margin: 0 0 14px; font: 700 14px 'DM Sans'; letter-spacing: .02em; color: var(--ink); }
 .leaderboard-panel { margin-top: 18px; }
 .leaderboard-preview { margin-top: 6px; }
 .leaderboard-row { display: grid; grid-template-columns: 24px 34px 1fr auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; }
@@ -510,3 +514,87 @@ footer { color: #91a09f; }
 .rules-body p { margin: 0 0 4px; font-size: 13px; line-height: 1.6; color: var(--muted); }
 .rules-body strong { color: var(--ink); }
 @media (max-width: 700px) { .settings-header { padding: 30px 2px 18px; } .settings-panel-lg { padding: 18px 14px; } .crow-preview-row { align-items: flex-start; gap: 12px; } .logo-preview { width: 58px; height: 80px; } }
+
+.avatar.sky { background: #6f9cc4; }
+.team-C { background: #f7e2de; color: #a4503f; }
+.team-D { background: #dce8f4; color: #3f6189; }
+.team-E { background: #eae3f2; color: #6b5b8f; }
+.scoreboard-five { flex-wrap: wrap; }
+.scoreboard-five div { min-width: 76px; flex: 1 1 auto; }
+.scoreboard-five span { white-space: nowrap; }
+.bid-players-five { grid-template-columns: repeat(5, 1fr); }
+.game-board.five-handed .table-center { left: 50%; top: 20%; transform: translate(-50%, -50%); width: 172px; height: auto; min-height: 150px; padding: 14px; }
+.called-line { margin-top: 8px; display: inline-flex; flex-direction: column; align-items: center; gap: 3px; }
+.called-line > span:first-child { font: 7px 'DM Mono'; text-transform: uppercase; letter-spacing: .08em; opacity: .8; }
+.called-card { display: grid; justify-items: center; gap: 1px; width: 30px; height: 42px; border-radius: 6px; border: 2px solid; }
+.called-card strong { font: 700 16px 'Fraunces'; }
+.called-card small { font: 7px 'DM Mono'; text-transform: uppercase; }
+.called-card.crow-card { background: var(--coral); border-color: #d85f51; }
+.called-card.crow-card strong, .called-card.crow-card small { color: #fff; }
+.game-board.five-handed .player-0 { left: 50%; bottom: 14px; transform: translateX(-50%); }
+.game-board.five-handed .player-1 { right: 12%; bottom: 30%; transform: translate(50%, 50%); }
+.game-board.five-handed .player-2 { right: 15%; top: 12%; transform: translate(50%, -50%); }
+.game-board.five-handed .player-3 { left: 15%; top: 12%; transform: translate(-50%, -50%); }
+.game-board.five-handed .player-4 { left: 12%; bottom: 30%; transform: translate(-50%, 50%); }
+.game-board.five-handed .table-card-position-0 { left: 50%; bottom: 24%; transform: translateX(-50%) rotate(0deg); }
+.game-board.five-handed .table-card-position-1 { right: 26%; bottom: 30%; transform: translate(50%, 50%) rotate(0deg); }
+.game-board.five-handed .table-card-position-2 { right: 28%; top: 26%; transform: translate(50%, -50%) rotate(0deg); }
+.game-board.five-handed .table-card-position-3 { left: 28%; top: 26%; transform: translate(-50%, -50%) rotate(0deg); }
+.game-board.five-handed .table-card-position-4 { left: 26%; bottom: 30%; transform: translate(-50%, 50%) rotate(0deg); }
+.game-board.five-handed .trick-capture .capture-target-0 { animation-name: capture-to-bottom; }
+.game-board.five-handed .trick-capture .capture-target-1 { animation-name: capture-to-lower-right; }
+.game-board.five-handed .trick-capture .capture-target-2 { animation-name: capture-to-top-right; }
+.game-board.five-handed .trick-capture .capture-target-3 { animation-name: capture-to-upper-left; }
+.game-board.five-handed .trick-capture .capture-target-4 { animation-name: capture-to-lower-left; }
+@keyframes capture-to-top-right { to { transform: translate(155px, -155px) scale(.45) rotate(90deg); opacity: 0; } }
+@keyframes capture-to-upper-left { to { transform: translate(-155px, -155px) scale(.45) rotate(135deg); opacity: 0; } }
+@keyframes capture-to-lower-right { to { transform: translate(155px, 90%) scale(.45) rotate(45deg); opacity: 0; } }
+@keyframes capture-to-lower-left { to { transform: translate(-155px, 90%) scale(.45) rotate(225deg); opacity: 0; } }
+@media (max-width: 700px) {
+  .bid-players-five { grid-template-columns: repeat(3, 1fr); }
+  .game-board.five-handed { min-height: 460px; height: 460px; }
+  .game-board.five-handed .table-center { left: 50%; top: 42%; transform: translate(-50%, -50%); width: 116px; min-height: 0; height: auto; padding: 10px 8px; }
+  .game-board.five-handed .table-center strong { font-size: 16px; }
+  .game-board.five-handed .table-center small { font-size: 8px; margin-top: 4px; }
+  .game-board.five-handed .table-center .table-hand-points { margin-top: 6px; gap: 4px; padding: 2px 6px; }
+  .game-board.five-handed .table-center .table-hand-points strong { font-size: 8px; }
+  .game-board.five-handed .called-line { margin-top: 5px; gap: 2px; }
+  .game-board.five-handed .called-card { width: 24px; height: 34px; }
+  .game-board.five-handed .called-card strong { font-size: 12px; }
+  .game-board.five-handed .called-card small { font-size: 5px; }
+}
+
+.pair-member .avatar { box-shadow: 0 0 0 3px #e8b84f; }
+.pair-chip { padding: 4px 7px; border-radius: 7px; background: #f6d88c; color: #76541b; font: 8px 'DM Mono'; text-transform: uppercase; letter-spacing: .05em; animation: pair-pop .3s ease; }
+.trio-member .avatar { box-shadow: 0 0 0 3px #5aa7a0; }
+.trio-chip { padding: 4px 7px; border-radius: 7px; background: #dcebe6; color: #2f6959; font: 8px 'DM Mono'; text-transform: uppercase; letter-spacing: .05em; animation: pair-pop .3s ease; }
+.solo-member .avatar { box-shadow: 0 0 0 3px #e98a7a; }
+.solo-chip { padding: 4px 7px; border-radius: 7px; background: #f7c4b8; color: #a4503f; font: 8px 'DM Mono'; text-transform: uppercase; letter-spacing: .05em; animation: pair-pop .3s ease; }
+@keyframes pair-pop { from { transform: scale(.6); opacity: 0; } }
+
+.game-type-toggle { display: flex; gap: 10px; margin: 0 0 24px; }
+.game-type-toggle button { flex: 1; max-width: 190px; text-align: left; border: 1px solid var(--line); background: #fffdf9; border-radius: 10px; padding: 12px 14px; cursor: pointer; color: var(--ink); }
+.game-type-toggle button strong { display: block; font: 700 15px 'DM Sans'; letter-spacing: -.01em; }
+.game-type-toggle button span { display: block; margin-top: 3px; color: var(--muted); font: 9px 'DM Mono'; text-transform: uppercase; letter-spacing: .05em; }
+.game-type-toggle button.active { border-color: var(--green); background: var(--green); box-shadow: 0 4px 0 #174c45; }
+.game-type-toggle button.active strong { color: #f6d7a1; }
+.game-type-toggle button.active span { color: #cfe0da; }
+
+.call-options { display: grid; grid-template-columns: repeat(12, 1fr); gap: 6px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
+.call-card { display: grid; justify-items: center; gap: 2px; padding: 9px 4px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; font-family: 'DM Sans'; }
+.call-card strong { font: 700 15px 'DM Sans'; color: var(--ink); }
+.call-card small { font: 8px 'DM Mono'; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.call-card.color-black { background: #cdd9dd; border-color: #9eafb5; }
+.call-card.color-black strong, .call-card.color-black small { color: #3d4d55; }
+.call-card.color-red { background: #ffcfc4; border-color: #e98a7a; }
+.call-card.color-red strong, .call-card.color-red small { color: #b85345; }
+.call-card.color-yellow { background: #f8e2a4; border-color: #e0b95e; }
+.call-card.color-yellow strong, .call-card.color-yellow small { color: #8f6618; }
+.call-card.color-green { background: #c6e4d9; border-color: #8bbfae; }
+.call-card.color-green strong, .call-card.color-green small { color: #256b5c; }
+.call-card.crow-card { background: var(--green); border-color: var(--green-dark); }
+.call-card.crow-card strong { color: #f6d7a1; }
+.call-card.crow-card small { color: #cfe0da; }
+.call-card:disabled { opacity: .35; filter: grayscale(.7); cursor: not-allowed; }
+.call-card:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 3px 0 #286b6240; }
+@media (max-width: 700px) { .call-options { grid-template-columns: repeat(8, 1fr); gap: 5px; } }

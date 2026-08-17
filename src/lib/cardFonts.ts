@@ -1,9 +1,9 @@
-export const COINS_PER_CARD_FONT = 10
+export const COINS_PER_CARD_FONT = 5
 
 const PREMIUM_CARD_FONTS = ['fire', 'aurora', 'cyber']
 
 export function cardFontPrice(fontId: string) {
-  return PREMIUM_CARD_FONTS.includes(fontId) ? 25 : COINS_PER_CARD_FONT
+  return PREMIUM_CARD_FONTS.includes(fontId) ? 20 : COINS_PER_CARD_FONT
 }
 
 export const CARD_FONTS = [

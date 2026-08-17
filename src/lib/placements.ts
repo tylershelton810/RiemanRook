@@ -1,4 +1,4 @@
-export const COINS_PER_PLACEMENT = 10
+export const COINS_PER_PLACEMENT = 5
 
 export const PLACEMENTS = [
   { id: 'crack', name: 'Crack', description: 'The board cracks as the crow slams down.' },

@@ -2,7 +2,7 @@ import type { Difficulty } from '../lib/types'
 
 export const COLORS = ['black', 'red', 'yellow', 'green'] as const
 export type CardColor = typeof COLORS[number]
-export type Team = 'A' | 'B'
+export type Team = 'A' | 'B' | 'C' | 'D' | 'E'
 
 export interface NumberCard {
   id: string
@@ -54,10 +54,14 @@ export interface HandKnowledge {
   currentWinnerId?: string
   currentWinnerCard?: Card
   currentTrickPoints: number
+  calledCard?: Card
+  partnerId?: string
+  partnershipRevealed?: boolean
+  alone?: boolean
 }
 
 export interface HandState {
-  phase: 'bidding' | 'trump' | 'kitty' | 'playing' | 'complete'
+  phase: 'bidding' | 'trump' | 'calling' | 'kitty' | 'playing' | 'complete'
   dealerIndex: number
   biddingPlayerIndex: number
   currentPlayerIndex: number
@@ -69,22 +73,32 @@ export interface HandState {
   kittyReveal?: Card[]
   tricks: Trick[]
   completed: boolean
-  teamPoints?: Record<Team, number>
+  teamPoints?: Record<string, number>
   winningTeam?: Team
   bidderTeam?: Team
   bidMade?: boolean
-  scoreDelta?: Record<Team, number>
+  scoreDelta?: Record<string, number>
   gameWinner?: Team
+  calledCard?: Card
+  partnerId?: string
+  partnershipRevealed?: boolean
+  alone?: boolean
+  pairPoints?: number
+  trioPoints?: number
+  winnerPlayerIds?: string[]
 }
+
+export type RulesetId = 'rieman-rules' | 'rieman-rules-5'
 
 export interface SessionState {
   id: string
   status: 'lobby' | 'active' | 'completed' | 'unfinished'
   players: PlayerState[]
-  scores: Record<Team, number>
+  scores: Record<string, number>
   handNumber: number
   winningScore: number
   stats: Record<string, PlayerSessionStats>
+  rulesetId?: RulesetId
   hand?: HandState
 }
 

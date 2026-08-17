@@ -1,4 +1,4 @@
-export const COINS_PER_CARD_ANIMATION = 10
+export const COINS_PER_CARD_ANIMATION = 5
 
 export const CARD_ANIMATIONS = [
   { id: 'pulse', name: 'Pulse', description: 'A glowing ring pulses your rook’s color outward.' },

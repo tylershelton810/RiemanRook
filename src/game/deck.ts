@@ -20,9 +20,10 @@ export function shuffleDeck(cards: Card[], random: () => number = Math.random): 
   return shuffled
 }
 
-export function dealDeck(cards: Card[], playerCount = 4) {
-  if (cards.length !== 57 || playerCount !== 4) throw new Error('Crow Rules currently require a 57-card deck and four players.')
+export function dealDeck(cards: Card[], playerCount = 4, cardsPerPlayer = 13, kittySize = 5) {
+  if (cards.length !== 57) throw new Error('Crow Rules currently require a 57-card deck.')
+  if (playerCount * cardsPerPlayer + kittySize !== 57) throw new Error('Deal parameters must cover the full 57-card deck.')
   const hands = Array.from({ length: playerCount }, () => [] as Card[])
-  for (let index = 0; index < 52; index += 1) hands[index % playerCount].push(cards[index])
-  return { hands, kitty: cards.slice(52) }
+  for (let index = 0; index < playerCount * cardsPerPlayer; index += 1) hands[index % playerCount].push(cards[index])
+  return { hands, kitty: cards.slice(playerCount * cardsPerPlayer) }
 }
