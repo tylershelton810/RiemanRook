@@ -141,7 +141,7 @@ export function chooseAiCardWithKnowledge(hand: Card[], knowledge: HandKnowledge
       }
     }
     const nonBeating = legalCards.filter((card) => !cardBeats(card, winningCard.card, leadColor, trumpColor))
-    const safePoints = nonBeating.filter((card) => cardPoints(card) > 0)
+    const safePoints = nonBeating.filter((card) => cardPoints(card) > 0 && !(card.kind === 'number' && card.value === 14))
     if (safePoints.length) return [...safePoints].sort((left, right) => cardPoints(right) - cardPoints(left) || rankForLowest(left) - rankForLowest(right))[0]
     if (nonBeating.length) {
       const nonBeatingNonTrump = nonBeating.filter((card) => card.kind === 'number' && card.color !== trumpColor)
@@ -157,8 +157,21 @@ export function chooseAiCardWithKnowledge(hand: Card[], knowledge: HandKnowledge
     }
     return lowestCard(winningTrump.length ? winningTrump : winningCards)
   }
+  // Can't win this trick — minimize waste
+  const lowTrump = legalCards.filter((card) => card.kind === 'number' && card.color === trumpColor)
+  if (lowTrump.length) return lowestCard(lowTrump)
   const nonTrumpCards = legalCards.filter((card) => card.kind === 'number' && card.color !== trumpColor)
-  return lowestCard(nonTrumpCards.length ? nonTrumpCards : legalCards)
+  if (nonTrumpCards.length) {
+    const expendable = nonTrumpCards.filter((card) => {
+      if (card.kind !== 'number') return false
+      if (POINT_VALUES.has(card.value)) return false
+      if (card.value === highestRemainingInSuit(knowledge, card.color)) return false
+      return true
+    })
+    if (expendable.length) return lowestCard(expendable)
+    return lowestCard(nonTrumpCards)
+  }
+  return lowestCard(legalCards)
 }
 
 export function buildHandKnowledge(trick: Trick | undefined, trumpColor: CardColor | undefined, bidder: PlayerState | undefined, completedTricks: Trick[]): HandKnowledge {
@@ -334,7 +347,7 @@ function chooseFollowCard5(legalCards: Card[], knowledge: HandKnowledge, aiPlaye
       }
     }
     const nonBeating = legalCards.filter((card) => !cardBeats(card, winningCard.card, leadColor, trumpColor))
-    const safePoints = nonBeating.filter((card) => cardPoints(card) > 0)
+    const safePoints = nonBeating.filter((card) => cardPoints(card) > 0 && !(card.kind === 'number' && card.value === 14))
     if (safePoints.length) return [...safePoints].sort((left, right) => cardPoints(right) - cardPoints(left) || rankForLowest(left) - rankForLowest(right))[0]
     if (nonBeating.length) {
       const nonBeatingNonTrump = nonBeating.filter((card) => card.kind === 'number' && card.color !== trumpColor)
@@ -350,8 +363,21 @@ function chooseFollowCard5(legalCards: Card[], knowledge: HandKnowledge, aiPlaye
     }
     return lowestCard(winningTrump.length ? winningTrump : winningCards)
   }
+  // Can't win this trick — minimize waste
+  const lowTrump = legalCards.filter((card) => card.kind === 'number' && card.color === trumpColor)
+  if (lowTrump.length) return lowestCard(lowTrump)
   const nonTrumpCards = legalCards.filter((card) => card.kind === 'number' && card.color !== trumpColor)
-  return lowestCard(nonTrumpCards.length ? nonTrumpCards : legalCards)
+  if (nonTrumpCards.length) {
+    const expendable = nonTrumpCards.filter((card) => {
+      if (card.kind !== 'number') return false
+      if (POINT_VALUES.has(card.value)) return false
+      if (card.value === highestRemainingInSuit(knowledge, card.color)) return false
+      return true
+    })
+    if (expendable.length) return lowestCard(expendable)
+    return lowestCard(nonTrumpCards)
+  }
+  return lowestCard(legalCards)
 }
 
 function chooseLeadCard5(hand: Card[], knowledge: HandKnowledge, aiPlayer?: PlayerState, players: PlayerState[] = []): Card {
