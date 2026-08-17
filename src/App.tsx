@@ -645,9 +645,12 @@ function App() {
     }
     try {
       await closeLobby(activeLobbyId, hostId)
+      suppressGameAutoJoinRef.current = true
       setLocalGame(false)
       setActiveGame(null)
       setActiveGameSessionId(null)
+      setActiveLobbyId(null)
+      setActiveLobbyHostId(null)
       setView('home')
     } catch (error) { showToast(error instanceof Error ? error.message : 'Unable to close the lobby.') }
   }
